@@ -358,6 +358,7 @@ def _get_simulator(
   }
 
   simulator = learned_simulator.LearnedSimulator(
+      processor=metadata['dim'],
       particle_dimensions=metadata['dim'],
       nnode_in=37 if metadata['dim'] == 3 else 30,
       nedge_in=metadata['dim'] + 1,
@@ -370,6 +371,9 @@ def _get_simulator(
       normalization_stats=normalization_stats,
       nparticle_types=NUM_PARTICLE_TYPES,
       particle_type_embedding_size=16,
+      in_gat_channels=128,
+      hidden_gat_channels=128,
+      attention_heads=2,
       device=device)
 
   return simulator
