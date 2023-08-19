@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 import numpy as np
 from gns import graph_network
+from gns import gat_network
 from torch_geometric.nn import radius_graph
 from typing import Dict
+from typing import Optional
 
 
 class LearnedSimulator(nn.Module):
@@ -11,6 +13,7 @@ class LearnedSimulator(nn.Module):
 
   def __init__(
           self,
+          processor: Optional[str],
           particle_dimensions: int,
           nnode_in: int,
           nedge_in: int,
@@ -23,10 +26,14 @@ class LearnedSimulator(nn.Module):
           normalization_stats: Dict,
           nparticle_types: int,
           particle_type_embedding_size,
+          in_gat_channels: int = None,
+          hidden_gat_channels: int = None,
+          attention_heads: int = None,
           device="cpu"):
     """Initializes the model.
 
     Args:
+      processor: Type of processor, either 'interaction_network' or 'graph_attention_network'
       particle_dimensions: Dimensionality of the problem.
       nnode_in: Number of node inputs.
       nedge_in: Number of edge inputs.
@@ -46,6 +53,7 @@ class LearnedSimulator(nn.Module):
 
     """
     super(LearnedSimulator, self).__init__()
+    self._processor = processor
     self._boundaries = boundaries
     self._connectivity_radius = connectivity_radius
     self._normalization_stats = normalization_stats
@@ -56,14 +64,35 @@ class LearnedSimulator(nn.Module):
         nparticle_types, particle_type_embedding_size)
 
     # Initialize the EncodeProcessDecode
-    self._encode_process_decode = graph_network.EncodeProcessDecode(
-        nnode_in_features=nnode_in,
-        nnode_out_features=particle_dimensions,
-        nedge_in_features=nedge_in,
-        latent_dim=latent_dim,
-        nmessage_passing_steps=nmessage_passing_steps,
-        nmlp_layers=nmlp_layers,
-        mlp_hidden_dim=mlp_hidden_dim)
+    if self._processor == "interaction_network":
+        self._encode_process_decode = graph_network.EncodeProcessDecode(
+            nnode_in_features=nnode_in,
+            nnode_out_features=particle_dimensions,
+            nedge_in_features=nedge_in,
+            latent_dim=latent_dim,
+            nmessage_passing_steps=nmessage_passing_steps,
+            nmlp_layers=nmlp_layers,
+            mlp_hidden_dim=mlp_hidden_dim)
+
+    elif self._processor == "graph_attention_network":
+        if hidden_gat_channels is None or attention_heads is None:
+            raise ValueError(
+                "Argument 'hidden_gat_channels' and 'attention_heads "
+                "must be specified for processor option 'graph_attention_network'")
+
+        self._encode_process_decode = gat_network.EncodeProcessDecode(
+            nnode_in_features=nnode_in,
+            nnode_out_features=particle_dimensions,
+            latent_dim=latent_dim,
+            in_gat_channels=in_gat_channels,
+            hidden_gat_channels=hidden_gat_channels,
+            nmessage_passing_steps=nmessage_passing_steps,
+            attention_heads=attention_heads,
+            nmlp_layers=nmlp_layers,
+            mlp_hidden_dim=mlp_hidden_dim)
+    else:
+        raise ValueError(
+            "Invalid processor option. Select either 'interaction_network' or 'graph_attention_network'")
 
     self._device = device
 
@@ -163,33 +192,43 @@ class LearnedSimulator(nn.Module):
     # Final node_features shape (nparticles, 30) for 2D
     # 30 = 10 (5 velocity sequences*dim) + 4 boundaries + 16 particle embedding
 
-    # Collect edge features.
-    edge_features = []
+    if self._processor == "interaction_network":
+        # Collect edge features.
+        edge_features = []
 
-    # Relative displacement and distances normalized to radius
-    # with shape (nedges, 2)
-    # normalized_relative_displacements = (
-    #     torch.gather(most_recent_position, 0, senders) -
-    #     torch.gather(most_recent_position, 0, receivers)
-    # ) / self._connectivity_radius
-    normalized_relative_displacements = (
-        most_recent_position[senders, :] -
-        most_recent_position[receivers, :]
-    ) / self._connectivity_radius
+        # Relative displacement and distances normalized to radius
+        # with shape (nedges, 2)
+        # normalized_relative_displacements = (
+        #     torch.gather(most_recent_position, 0, senders) -
+        #     torch.gather(most_recent_position, 0, receivers)
+        # ) / self._connectivity_radius
+        normalized_relative_displacements = (
+            most_recent_position[senders, :] -
+            most_recent_position[receivers, :]
+        ) / self._connectivity_radius
 
-    # Add relative displacement between two particles as an edge feature
-    # with shape (nparticles, ndim)
-    edge_features.append(normalized_relative_displacements)
+        # Add relative displacement between two particles as an edge feature
+        # with shape (nparticles, ndim)
+        edge_features.append(normalized_relative_displacements)
 
-    # Add relative distance between 2 particles with shape (nparticles, 1)
-    # Edge features has a final shape of (nparticles, ndim + 1)
-    normalized_relative_distances = torch.norm(
-        normalized_relative_displacements, dim=-1, keepdim=True)
-    edge_features.append(normalized_relative_distances)
+        # Add relative distance between 2 particles with shape (nparticles, 1)
+        # Edge features has a final shape of (nparticles, ndim + 1)
+        normalized_relative_distances = torch.norm(
+            normalized_relative_displacements, dim=-1, keepdim=True)
+        edge_features.append(normalized_relative_distances)
 
-    return (torch.cat(node_features, dim=-1),
-            torch.stack([senders, receivers]),
-            torch.cat(edge_features, dim=-1))
+        return (torch.cat(node_features, dim=-1),
+                torch.stack([senders, receivers]),
+                torch.cat(edge_features, dim=-1))
+
+    elif self._processor == "graph_attention_network":
+        return (torch.cat(node_features, dim=-1),
+                torch.stack([senders, receivers]))
+
+    else:
+        raise ValueError(
+            "Invalid processor option. Select either 'interaction_network' or 'graph_attention_network'")
+
 
   def _decoder_postprocessor(
           self,
@@ -239,12 +278,23 @@ class LearnedSimulator(nn.Module):
     Returns:
       next_positions (torch.tensor): Next position of particles.
     """
-    node_features, edge_index, edge_features = self._encoder_preprocessor(
-        current_positions, nparticles_per_example, particle_types)
-    predicted_normalized_acceleration = self._encode_process_decode(
-        node_features, edge_index, edge_features)
+    if self._processor == "interaction_network":
+        node_features, edge_index, edge_features = self._encoder_preprocessor(
+            current_positions, nparticles_per_example, particle_types)
+        predicted_normalized_acceleration = self._encode_process_decode(
+            node_features, edge_index, edge_features)
+    elif self._processor == "graph_attention_network":
+        node_features, edge_index = self._encoder_preprocessor(
+            current_positions, nparticles_per_example, particle_types)
+        predicted_normalized_acceleration = self._encode_process_decode(
+            node_features, edge_index)
+    else:
+        raise ValueError(
+            "Invalid processor option. Select either 'interaction_network' or 'graph_attention_network'")
+
     next_positions = self._decoder_postprocessor(
         predicted_normalized_acceleration, current_positions)
+
     return next_positions
 
   def predict_accelerations(
@@ -277,10 +327,19 @@ class LearnedSimulator(nn.Module):
     noisy_position_sequence = position_sequence + position_sequence_noise
 
     # Perform the forward pass with the noisy position sequence.
-    node_features, edge_index, edge_features = self._encoder_preprocessor(
-        noisy_position_sequence, nparticles_per_example, particle_types)
-    predicted_normalized_acceleration = self._encode_process_decode(
-        node_features, edge_index, edge_features)
+    if self._processor == "interaction_network":
+        node_features, edge_index, edge_features = self._encoder_preprocessor(
+            noisy_position_sequence, nparticles_per_example, particle_types)
+        predicted_normalized_acceleration = self._encode_process_decode(
+            node_features, edge_index, edge_features)
+    elif self._processor == "graph_attention_network":
+        node_features, edge_index = self._encoder_preprocessor(
+            noisy_position_sequence, nparticles_per_example, particle_types)
+        predicted_normalized_acceleration = self._encode_process_decode(
+            node_features, edge_index)
+    else:
+        raise ValueError(
+            "Invalid processor option. Select either 'interaction_network' or 'graph_attention_network'")
 
     # Calculate the target acceleration, using an `adjusted_next_position `that
     # is shifted by the noise in the last input position.
