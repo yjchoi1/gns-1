@@ -26,6 +26,7 @@ class LearnedSimulator(nn.Module):
           normalization_stats: Dict,
           nparticle_types: int,
           particle_type_embedding_size,
+          boundary_clamp_limit: float = 1.0,
           in_gat_channels: int = None,
           hidden_gat_channels: int = None,
           attention_heads: int = None,
@@ -58,6 +59,7 @@ class LearnedSimulator(nn.Module):
     self._connectivity_radius = connectivity_radius
     self._normalization_stats = normalization_stats
     self._nparticle_types = nparticle_types
+    self._boundary_clamp_limit = boundary_clamp_limit
 
     # Particle type embedding has shape (9, 16)
     self._particle_type_embedding = nn.Embedding(
@@ -175,7 +177,8 @@ class LearnedSimulator(nn.Module):
     distance_to_boundaries = torch.cat(
         [distance_to_lower_boundary, distance_to_upper_boundary], dim=1)
     normalized_clipped_distance_to_boundaries = torch.clamp(
-        distance_to_boundaries / self._connectivity_radius, -1., 1.)
+        distance_to_boundaries / self._connectivity_radius,
+        -self._boundary_clamp_limit, self._boundary_clamp_limit)
     # The distance to 4 boundaries (top/bottom/left/right)
     # node_features shape (nparticles, 10+4)
     node_features.append(normalized_clipped_distance_to_boundaries)

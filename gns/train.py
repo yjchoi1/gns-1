@@ -375,6 +375,7 @@ def _get_simulator(
       normalization_stats=normalization_stats,
       nparticle_types=NUM_PARTICLE_TYPES,
       particle_type_embedding_size=16,
+      boundary_clamp_limit=metadata['boundary_augment'],
       in_gat_channels=128,
       hidden_gat_channels=128,
       attention_heads=2,
