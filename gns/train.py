@@ -304,7 +304,9 @@ def train(rank, flags, world_size):
               simulator.save(flags["model_path"] + 'model-'+str(step)+'.pt')
             else:
               simulator.module.save(flags["model_path"] + 'model-'+str(step)+'.pt')
-            train_state = dict(optimizer_state=optimizer.state_dict(), global_train_state={"step":step})
+            train_state = dict(optimizer_state=optimizer.state_dict(),
+                               global_train_state={"step": step},
+                               loss=loss.item())
             torch.save(train_state, f'{flags["model_path"]}train_state-{step}.pt')
 
         # Complete training
@@ -322,7 +324,9 @@ def train(rank, flags, world_size):
       simulator.save(flags["model_path"] + 'model-'+str(step)+'.pt')
     else:
       simulator.module.save(flags["model_path"] + 'model-'+str(step)+'.pt')
-    train_state = dict(optimizer_state=optimizer.state_dict(), global_train_state={"step":step})
+    train_state = dict(optimizer_state=optimizer.state_dict(),
+                       global_train_state={"step": step},
+                       loss=loss.item())
     torch.save(train_state, f'{flags["model_path"]}train_state-{step}.pt')
 
   if torch.cuda.is_available():
@@ -358,6 +362,7 @@ def _get_simulator(
   }
 
   simulator = learned_simulator.LearnedSimulator(
+      processor=metadata['processor_type'],
       particle_dimensions=metadata['dim'],
       nnode_in=37 if metadata['dim'] == 3 else 30,
       nedge_in=metadata['dim'] + 1,
@@ -370,6 +375,9 @@ def _get_simulator(
       normalization_stats=normalization_stats,
       nparticle_types=NUM_PARTICLE_TYPES,
       particle_type_embedding_size=16,
+      in_gat_channels=128,
+      hidden_gat_channels=128,
+      attention_heads=2,
       device=device)
 
   return simulator

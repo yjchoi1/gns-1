@@ -2,29 +2,11 @@ from typing import List
 import torch
 import torch.nn as nn
 from torch_geometric.nn import MessagePassing
-from torch_geometric.nn import GATv2Conv
+from torch_geometric.nn import GAT
 from graph_network import build_mlp
+from graph_network import Encoder
+from graph_network import Decoder
 import torch.nn.functional as F
-
-
-class Encoder(nn.Module):
-    def __init__(
-            self,
-            nnode_in_features: int,
-            nnode_out_features: int,
-            nmlp_layers: int,
-            mlp_hidden_dim: int):
-
-        super(Encoder, self).__init__()
-        # Encode node features as an MLP
-        self.node_fn = nn.Sequential(*[build_mlp(nnode_in_features,
-                                                 [mlp_hidden_dim
-                                                  for _ in range(nmlp_layers)],
-                                                 nnode_out_features),
-                                       nn.LayerNorm(nnode_out_features)])
-
-    def forward(self, x: torch.tensor):
-        return self.node_fn(x)
 
 
 class GraphAttentionNetwork(torch.nn.Module):
@@ -34,72 +16,26 @@ class GraphAttentionNetwork(torch.nn.Module):
             hidden_channels,
             out_channels,
             num_layers,
-            heads=1,
+            heads,
             use_layernorm=True):
-
         super(GraphAttentionNetwork, self).__init__()
-        self.num_layers = num_layers
-        self.use_layernorm = use_layernorm
-        self.convs = torch.nn.ModuleList()
-        self.norms = torch.nn.ModuleList() if use_layernorm else None
 
-        self.convs.append(GATv2Conv(in_channels, hidden_channels, heads=heads, concat=True))
-        if use_layernorm:
-            self.norms.append(torch.nn.LayerNorm(hidden_channels * heads))
-        for _ in range(num_layers - 2):
-            self.convs.append(GATv2Conv(heads * hidden_channels, hidden_channels, heads=heads, concat=True))
-            if use_layernorm:
-                self.norms.append(torch.nn.LayerNorm(hidden_channels * heads))
-        self.convs.append(GATv2Conv(heads * hidden_channels, out_channels, heads=heads, concat=False))
+        self.gat_layers = GAT(
+            in_channels=in_channels,
+            hidden_channels=hidden_channels,
+            num_layers=num_layers,
+            out_channels=out_channels,
+            norm=torch.nn.LayerNorm(hidden_channels) if use_layernorm is True else None,
+            heads=heads,
+            concat=True
+        )
 
-    def forward(self, x, edge_index):
-        for i in range(self.num_layers):
-            x = self.convs[i](x, edge_index)
-            if i != self.num_layers - 1:
-                x = F.relu(x)
-                if self.use_layernorm:
-                    x = self.norms[i](x)
+    def forward(self, x, edge_index, edge_attr=None):
+        if edge_attr is not None:
+            self.gat_layers(x, edge_index, edge_attr=edge_attr)
+        else:
+            self.gat_layers(x, edge_index)
         return x
-
-
-class Decoder(nn.Module):
-    """The Decoder: :math: `\mathcal{G} \rightarrow \mathcal{Y}` extracts the
-    dynamics information from the nodes of the final latent graph,
-    :math: `y_i = \delta v (v_i^M)`
-
-    """
-
-    def __init__(
-            self,
-            nnode_in: int,
-            nnode_out: int,
-            nmlp_layers: int,
-            mlp_hidden_dim: int):
-        """The Decoder coder's learned function, :math: `\detla v`, is an MLP.
-        After the Decoder, the future position and velocity are updated using an
-        Euler integrator, so the :math: `yi` corresponds to accelerations,
-        :math: `\"{p}_i`, with 2D or 3D dimension, depending on the physical domain.
-
-        Args:
-          nnode_in: Number of node inputs (latent dimension of size 128).
-          nnode_out: Number of node outputs (particle dimension).
-          nmlp_layer: Number of hidden layers in the MLP (typically of size 2).
-          mlp_hidden_dim: Size of the hidden layer (latent dimension of size 128).
-        """
-        super(Decoder, self).__init__()
-        self.node_fn = build_mlp(
-            nnode_in, [mlp_hidden_dim for _ in range(nmlp_layers)], nnode_out)
-
-    def forward(self,
-                x: torch.tensor):
-        """The forward hook runs when the Decoder class is instantiated
-
-        Args:
-          x: Particle state representation as a torch tensor with shape
-            (nparticles, nnode_in)
-
-        """
-        return self.node_fn(x)
 
 
 class EncodeProcessDecode(nn.Module):
@@ -107,6 +43,7 @@ class EncodeProcessDecode(nn.Module):
             self,
             nnode_in_features: int,
             nnode_out_features: int,
+            nedge_in_features: int,
             latent_dim: int,
             in_gat_channels: int,
             hidden_gat_channels: int,
@@ -135,6 +72,8 @@ class EncodeProcessDecode(nn.Module):
         self._encoder = Encoder(
             nnode_in_features=nnode_in_features,
             nnode_out_features=latent_dim,
+            nedge_in_features=nedge_in_features,
+            nedge_out_features=latent_dim,
             nmlp_layers=nmlp_layers,
             mlp_hidden_dim=mlp_hidden_dim,
         )
@@ -143,7 +82,8 @@ class EncodeProcessDecode(nn.Module):
             hidden_channels=hidden_gat_channels,
             out_channels=latent_dim,
             num_layers=nmessage_passing_steps,
-            heads=attention_heads
+            heads=attention_heads,
+            use_layernorm=True
         )
         self._decoder = Decoder(
             nnode_in=latent_dim,
@@ -154,7 +94,9 @@ class EncodeProcessDecode(nn.Module):
 
     def forward(self,
                 x: torch.tensor,
-                edge_index: torch.tensor):
+                edge_index: torch.tensor,
+                edge_features: torch.tensor):
+
         """The forward hook runs at instatiation of EncodeProcessorDecode class.
 
           Args:
@@ -167,10 +109,9 @@ class EncodeProcessDecode(nn.Module):
             x: Particle state representation as a torch tensor with shape
               (nparticles, nnode_out_features)
         """
-        x = self._encoder(x)
-        x = self._processor(x, edge_index)
+        x, edge_features = self._encoder(x, edge_features)
+        x = self._processor(x, edge_index, edge_features)
         x = self._decoder(x)
         return x
-
 
 # interaction_network // graph_attention_network
