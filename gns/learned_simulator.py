@@ -188,7 +188,7 @@ class LearnedSimulator(nn.Module):
     # Edge features has a final shape of (nparticles, ndim + 1)
     normalized_relative_distances = torch.norm(
         normalized_relative_displacements, dim=-1, keepdim=True)
-    edge_features.append(normalized_relative_distances)
+    # edge_features.append(normalized_relative_distances)
 
     return (torch.cat(node_features, dim=-1),
             torch.stack([senders, receivers]),
