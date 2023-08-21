@@ -320,7 +320,7 @@ def train(rank, flags, world_size):
     pass
 
   if rank == 0 or torch.device("cpu"):
-    if torch.device("cpu"):
+    if rank == torch.device("cpu"):
       simulator.save(flags["model_path"] + 'model-'+str(step)+'.pt')
     else:
       simulator.module.save(flags["model_path"] + 'model-'+str(step)+'.pt')
