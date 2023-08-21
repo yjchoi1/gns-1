@@ -380,6 +380,7 @@ def _get_simulator(
       hidden_gat_channels=128,
       attention_heads=2,
       device=device)
+  print(f"Processor: {metadata['processor_type']}")
 
   return simulator
 
