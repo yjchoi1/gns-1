@@ -25,9 +25,9 @@ flags.DEFINE_enum(
     help='Train model, validation or rollout evaluation.')
 flags.DEFINE_integer('batch_size', 2, help='The batch size.')
 flags.DEFINE_float('noise_std', 6.7e-4, help='The std deviation of the noise.')
-flags.DEFINE_string('data_path', None, help='The dataset directory.')
-flags.DEFINE_string('model_path', 'models/', help=('The path for saving checkpoints of the model.'))
-flags.DEFINE_string('output_path', 'rollouts/', help='The path for saving outputs (e.g. rollouts).')
+flags.DEFINE_string('data_path', "/work2/08264/baagee/frontera/gns-mpm-data/gns-data/datasets/sand2d_paper_baseline/", help='The dataset directory.')
+flags.DEFINE_string('model_path', '/work2/08264/baagee/frontera/gns-mpm-data/gns-data/models/sand2d_paper_baseline/', help=('The path for saving checkpoints of the model.'))
+flags.DEFINE_string('output_path', '/work2/08264/baagee/frontera/gns-mpm-data/gns-data/rollouts/sand2d_paper_baseline/', help='The path for saving outputs (e.g. rollouts).')
 flags.DEFINE_string('model_file', None, help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 flags.DEFINE_string('train_state_file', 'train_state.pt', help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 
@@ -296,7 +296,7 @@ def train(rank, flags, world_size):
         for param in optimizer.param_groups:
           param['lr'] = lr_new
 
-        if rank == 0 or torch.device("cpu"):
+        if rank == 0 or rank == torch.device("cpu"):
           print(f'Training step: {step}/{flags["ntraining_steps"]}. Loss: {loss}.')
           # Save model state
           if step % flags["nsave_steps"] == 0:
@@ -319,7 +319,7 @@ def train(rank, flags, world_size):
   except KeyboardInterrupt:
     pass
 
-  if rank == 0 or torch.device("cpu"):
+  if rank == 0 or rank == torch.device("cpu"):
     if rank == torch.device("cpu"):
       simulator.save(flags["model_path"] + 'model-'+str(step)+'.pt')
     else:
