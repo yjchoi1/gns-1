@@ -112,7 +112,7 @@ def predict(device: str, FLAGS, flags, world_size):
 
   """
   metadata = reading_utils.read_metadata(FLAGS.data_path)
-  simulator = _get_simulator(metadata, FLAGS.noise_std, FLAGS.noise_std, device)
+  simulator = _get_simulator(metadata["rollout"], FLAGS.noise_std, FLAGS.noise_std, device)
 
   # Load simulator
   if os.path.exists(FLAGS.model_path + FLAGS.model_file):
@@ -187,11 +187,11 @@ def train(rank, flags, world_size):
   metadata = reading_utils.read_metadata(flags["data_path"])
 
   if type(rank) == int:
-    serial_simulator = _get_simulator(metadata, flags["noise_std"], flags["noise_std"], rank)
+    serial_simulator = _get_simulator(metadata["train"], flags["noise_std"], flags["noise_std"], rank)
     simulator = DDP(serial_simulator.to(rank), device_ids=[rank], output_device=rank)
     optimizer = torch.optim.Adam(simulator.parameters(), lr=flags["lr_init"]*world_size)
   else:
-    simulator = _get_simulator(metadata, flags["noise_std"], flags["noise_std"], rank)
+    simulator = _get_simulator(metadata["train"], flags["noise_std"], flags["noise_std"], rank)
     optimizer = torch.optim.Adam(simulator.parameters(), lr=flags["lr_init"] * world_size)
   step = 0
 
