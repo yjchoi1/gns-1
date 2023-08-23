@@ -25,9 +25,9 @@ flags.DEFINE_enum(
     help='Train model, validation or rollout evaluation.')
 flags.DEFINE_integer('batch_size', 2, help='The batch size.')
 flags.DEFINE_float('noise_std', 6.7e-4, help='The std deviation of the noise.')
-flags.DEFINE_string('data_path', "/work2/08264/baagee/frontera/gns-mpm-data/gns-data/datasets/sand2d_paper_baseline/", help='The dataset directory.')
-flags.DEFINE_string('model_path', '/work2/08264/baagee/frontera/gns-mpm-data/gns-data/models/sand2d_paper_baseline/', help=('The path for saving checkpoints of the model.'))
-flags.DEFINE_string('output_path', '/work2/08264/baagee/frontera/gns-mpm-data/gns-data/rollouts/sand2d_paper_baseline/', help='The path for saving outputs (e.g. rollouts).')
+flags.DEFINE_string('data_path', None, help='The dataset directory.')
+flags.DEFINE_string('model_path', 'models/', help=('The path for saving checkpoints of the model.'))
+flags.DEFINE_string('output_path', 'rollouts/', help='The path for saving outputs (e.g. rollouts).')
 flags.DEFINE_string('model_file', None, help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 flags.DEFINE_string('train_state_file', 'train_state.pt', help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 
@@ -112,7 +112,8 @@ def predict(device: str, FLAGS, flags, world_size):
 
   """
   metadata = reading_utils.read_metadata(FLAGS.data_path)
-  simulator = _get_simulator(metadata["rollout"], FLAGS.noise_std, FLAGS.noise_std, device)
+  metadata = metadata["rollout"]
+  simulator = _get_simulator(metadata, FLAGS.noise_std, FLAGS.noise_std, device)
 
   # Load simulator
   if os.path.exists(FLAGS.model_path + FLAGS.model_file):
@@ -185,13 +186,14 @@ def train(rank, flags, world_size):
     rank = torch.device("cpu")
 
   metadata = reading_utils.read_metadata(flags["data_path"])
+  metadata = metadata["train"]
 
   if type(rank) == int:
-    serial_simulator = _get_simulator(metadata["train"], flags["noise_std"], flags["noise_std"], rank)
+    serial_simulator = _get_simulator(metadata, flags["noise_std"], flags["noise_std"], rank)
     simulator = DDP(serial_simulator.to(rank), device_ids=[rank], output_device=rank)
     optimizer = torch.optim.Adam(simulator.parameters(), lr=flags["lr_init"]*world_size)
   else:
-    simulator = _get_simulator(metadata["train"], flags["noise_std"], flags["noise_std"], rank)
+    simulator = _get_simulator(metadata, flags["noise_std"], flags["noise_std"], rank)
     optimizer = torch.optim.Adam(simulator.parameters(), lr=flags["lr_init"] * world_size)
   step = 0
 
@@ -363,7 +365,7 @@ def _get_simulator(
 
   simulator = learned_simulator.LearnedSimulator(
       particle_dimensions=metadata['dim'],
-      nnode_in=metadata['nedge_in'],  # 2D: 30, 3D: 37
+      nnode_in=metadata['nnode_in'],  # 2D: 30, 3D: 37
       nedge_in=metadata['nedge_in'],  # ndims +  1
       latent_dim=128,
       nmessage_passing_steps=10,
