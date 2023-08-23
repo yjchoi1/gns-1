@@ -112,7 +112,7 @@ def predict(device: str, FLAGS, flags, world_size):
 
   """
   metadata = reading_utils.read_metadata(FLAGS.data_path)
-  simulator = _get_simulator(metadata, FLAGS.noise_std, FLAGS.noise_std, device)
+  simulator = _get_simulator(metadata["rollout"], FLAGS.noise_std, FLAGS.noise_std, device)
 
   # Load simulator
   if os.path.exists(FLAGS.model_path + FLAGS.model_file):
@@ -187,11 +187,11 @@ def train(rank, flags, world_size):
   metadata = reading_utils.read_metadata(flags["data_path"])
 
   if type(rank) == int:
-    serial_simulator = _get_simulator(metadata, flags["noise_std"], flags["noise_std"], rank)
+    serial_simulator = _get_simulator(metadata["train"], flags["noise_std"], flags["noise_std"], rank)
     simulator = DDP(serial_simulator.to(rank), device_ids=[rank], output_device=rank)
     optimizer = torch.optim.Adam(simulator.parameters(), lr=flags["lr_init"]*world_size)
   else:
-    simulator = _get_simulator(metadata, flags["noise_std"], flags["noise_std"], rank)
+    simulator = _get_simulator(metadata["train"], flags["noise_std"], flags["noise_std"], rank)
     optimizer = torch.optim.Adam(simulator.parameters(), lr=flags["lr_init"] * world_size)
   step = 0
 
@@ -364,8 +364,8 @@ def _get_simulator(
   simulator = learned_simulator.LearnedSimulator(
       processor=metadata['processor_type'],
       particle_dimensions=metadata['dim'],
-      nnode_in=37 if metadata['dim'] == 3 else 30,
-      nedge_in=metadata['dim'] + 1,
+      nnode_in=metadata['nnode_in'],  # 2D: 30, 3D: 37
+      nedge_in=metadata['nedge_in'],  # ndims +  1
       latent_dim=128,
       nmessage_passing_steps=10,
       nmlp_layers=2,
@@ -376,10 +376,12 @@ def _get_simulator(
       nparticle_types=NUM_PARTICLE_TYPES,
       particle_type_embedding_size=16,
       boundary_clamp_limit=metadata['boundary_augment'],
-      in_gat_channels=128,
-      hidden_gat_channels=128,
-      attention_heads=2,
+      in_gat_channels=metadata["in_gat_channels"],
+      hidden_gat_channels=metadata["hidden_gat_channels"],
+      out_gat_channels=metadata["out_gat_channels"],
+      attention_heads=metadata["attention_heads"],
       device=device)
+  print(f"Processor: {metadata['processor_type']}")
 
   return simulator
 
