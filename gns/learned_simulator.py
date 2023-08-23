@@ -29,6 +29,7 @@ class LearnedSimulator(nn.Module):
           boundary_clamp_limit: float = 1.0,
           in_gat_channels: int = None,
           hidden_gat_channels: int = None,
+          out_gat_channels: int = None,
           attention_heads: int = None,
           device="cpu"):
     """Initializes the model.
@@ -84,6 +85,7 @@ class LearnedSimulator(nn.Module):
             latent_dim=latent_dim,
             in_gat_channels=in_gat_channels,
             hidden_gat_channels=hidden_gat_channels,
+            out_gat_channels=out_gat_channels,
             nmessage_passing_steps=nmessage_passing_steps,
             attention_heads=attention_heads,
             nmlp_layers=nmlp_layers,
