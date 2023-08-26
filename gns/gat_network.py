@@ -34,7 +34,7 @@ class GraphAttentionNetwork(torch.nn.Module):
             hidden_channels,
             out_channels,
             num_layers,
-            heads=1,
+            heads,
             use_layernorm=True):
 
         super(GraphAttentionNetwork, self).__init__()
@@ -110,6 +110,7 @@ class EncodeProcessDecode(nn.Module):
             latent_dim: int,
             in_gat_channels: int,
             hidden_gat_channels: int,
+            out_gat_channels: int,
             nmessage_passing_steps: int,
             attention_heads: int,
             nmlp_layers: int,
@@ -141,9 +142,10 @@ class EncodeProcessDecode(nn.Module):
         self._processor = GraphAttentionNetwork(
             in_channels=in_gat_channels,
             hidden_channels=hidden_gat_channels,
-            out_channels=latent_dim,
+            out_channels=out_gat_channels,
             num_layers=nmessage_passing_steps,
-            heads=attention_heads
+            heads=attention_heads,
+            use_layernorm=True,
         )
         self._decoder = Decoder(
             nnode_in=latent_dim,
