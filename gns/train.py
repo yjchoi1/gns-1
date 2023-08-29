@@ -25,9 +25,9 @@ flags.DEFINE_enum(
     help='Train model, validation or rollout evaluation.')
 flags.DEFINE_integer('batch_size', 2, help='The batch size.')
 flags.DEFINE_float('noise_std', 6.7e-4, help='The std deviation of the noise.')
-flags.DEFINE_string('data_path', None, help='The dataset directory.')
-flags.DEFINE_string('model_path', 'models/', help=('The path for saving checkpoints of the model.'))
-flags.DEFINE_string('output_path', 'rollouts/', help='The path for saving outputs (e.g. rollouts).')
+flags.DEFINE_string('data_path', "/work2/08264/baagee/frontera/gns-mpm-data/gns-data/datasets/sand2d_pure_gatconv/", help='The dataset directory.')
+flags.DEFINE_string('model_path', '/work2/08264/baagee/frontera/gns-mpm-data/gns-data/models/sand2d_pure_gatconv/', help=('The path for saving checkpoints of the model.'))
+flags.DEFINE_string('output_path', '/work2/08264/baagee/frontera/gns-mpm-data/gns-data/rollouts/sand2d_pure_gatconv/', help='The path for saving outputs (e.g. rollouts).')
 flags.DEFINE_string('model_file', None, help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 flags.DEFINE_string('train_state_file', 'train_state.pt', help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 

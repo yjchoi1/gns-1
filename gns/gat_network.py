@@ -2,7 +2,7 @@ from typing import List
 import torch
 import torch.nn as nn
 from torch_geometric.nn import MessagePassing
-from torch_geometric.nn import GATv2Conv
+from torch_geometric.nn import GATConv
 from graph_network import build_mlp
 import torch.nn.functional as F
 
@@ -34,31 +34,38 @@ class GraphAttentionNetwork(torch.nn.Module):
             hidden_channels,
             out_channels,
             num_layers,
-            heads,
-            use_layernorm=True):
+            heads):
 
         super(GraphAttentionNetwork, self).__init__()
-        self.num_layers = num_layers
-        self.use_layernorm = use_layernorm
-        self.convs = torch.nn.ModuleList()
-        self.norms = torch.nn.ModuleList() if use_layernorm else None
 
-        self.convs.append(GATv2Conv(in_channels, hidden_channels, heads=heads, concat=True))
-        if use_layernorm:
-            self.norms.append(torch.nn.LayerNorm(hidden_channels * heads))
+        self.layers = torch.nn.ModuleList()
+        self.num_layers = num_layers
+
+        # Input layer
+        self.layers.append(
+            GATConv(in_channels, hidden_channels, heads=heads))
+
+        # Hidden layers
         for _ in range(num_layers - 2):
-            self.convs.append(GATv2Conv(heads * hidden_channels, hidden_channels, heads=heads, concat=True))
-            if use_layernorm:
-                self.norms.append(torch.nn.LayerNorm(hidden_channels * heads))
-        self.convs.append(GATv2Conv(heads * hidden_channels, out_channels, heads=heads, concat=False))
+            self.layers.append(
+                GATConv(hidden_channels * heads, hidden_channels, heads=heads))
+
+        # Output layer
+        self.layers.append(
+            GATConv(hidden_channels * heads, out_channels, heads=heads, concat=False))
+
+    def reset_parameters(self):
+        r"""Resets all learnable parameters of the module."""
+        for conv in self.layers:
+            conv.reset_parameters()
 
     def forward(self, x, edge_index):
-        for i in range(self.num_layers):
-            x = self.convs[i](x, edge_index)
-            if i != self.num_layers - 1:
-                x = F.relu(x)
-                if self.use_layernorm:
-                    x = self.norms[i](x)
+        for i in range(self.num_layers - 1):
+            x = self.layers[i](x, edge_index)
+
+        # Output layer
+        x = self.layers[-1](x, edge_index)
+
         return x
 
 
@@ -144,8 +151,7 @@ class EncodeProcessDecode(nn.Module):
             hidden_channels=hidden_gat_channels,
             out_channels=out_gat_channels,
             num_layers=nmessage_passing_steps,
-            heads=attention_heads,
-            use_layernorm=True,
+            heads=attention_heads
         )
         self._decoder = Decoder(
             nnode_in=latent_dim,
