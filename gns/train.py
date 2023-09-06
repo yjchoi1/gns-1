@@ -28,6 +28,7 @@ flags.DEFINE_float('noise_std', 6.7e-4, help='The std deviation of the noise.')
 flags.DEFINE_string('data_path', None, help='The dataset directory.')
 flags.DEFINE_string('model_path', 'models/', help=('The path for saving checkpoints of the model.'))
 flags.DEFINE_string('output_path', 'rollouts/', help='The path for saving outputs (e.g. rollouts).')
+flags.DEFINE_string('output_name', 'rollout', help='The name when saving rollout pkl files')
 flags.DEFINE_string('model_file', None, help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 flags.DEFINE_string('train_state_file', 'train_state.pt', help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 
@@ -46,6 +47,7 @@ Stats = collections.namedtuple('Stats', ['mean', 'std'])
 INPUT_SEQUENCE_LENGTH = 6  # So we can calculate the last 5 velocities.
 NUM_PARTICLE_TYPES = 9
 KINEMATIC_PARTICLE_ID = 3
+
 
 def rollout(
         simulator: learned_simulator.LearnedSimulator,
@@ -67,7 +69,7 @@ def rollout(
   current_positions = initial_positions
   predictions = []
 
-  for step in range(nsteps):
+  for step in tqdm(range(nsteps), total=nsteps):
     # Get next position with shape (nnodes, dim)
     next_position = simulator.predict_positions(
         current_positions,
@@ -104,7 +106,7 @@ def rollout(
   return output_dict, loss
 
 
-def predict(device: str, FLAGS, flags, world_size):
+def predict(device: torch.device):
   """Predict rollouts.
 
   Args:
@@ -151,7 +153,7 @@ def predict(device: str, FLAGS, flags, world_size):
       # Save rollout in testing
       if FLAGS.mode == 'rollout':
         example_rollout['metadata'] = metadata
-        filename = f'rollout_{example_i}.pkl'
+        filename = f'{FLAGS.output_name}_ex{example_i}.pkl'
         filename = os.path.join(FLAGS.output_path, filename)
         with open(filename, 'wb') as f:
           pickle.dump(example_rollout, f)
