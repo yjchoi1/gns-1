@@ -119,7 +119,7 @@ def predict(device: str, FLAGS, flags, world_size):
   if os.path.exists(FLAGS.model_path + FLAGS.model_file):
     simulator.load(FLAGS.model_path + FLAGS.model_file)
   else:
-    train(simulator, flags, world_size, device)
+    raise ValueError(f"Model file does not exist in {FLAGS.model_path + FLAGS.model_file}")
   simulator.to(device)
   simulator.eval()
 
