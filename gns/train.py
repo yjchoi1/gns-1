@@ -9,6 +9,7 @@ import sys
 import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
+from tqdm import tqdm
 
 from absl import flags
 from absl import app
@@ -41,6 +42,7 @@ flags.DEFINE_float('lr_decay', 0.1, help='Learning rate decay.')
 flags.DEFINE_integer('lr_decay_steps', int(5e6), help='Learning rate decay steps.')
 
 flags.DEFINE_integer("cuda_device_number", None, help="CUDA device (zero indexed), default is None so default CUDA device will be used.")
+FLAGS = flags.FLAGS
 
 Stats = collections.namedtuple('Stats', ['mean', 'std'])
 
@@ -431,10 +433,9 @@ def main(_):
 
   elif FLAGS.mode in ['valid', 'rollout']:
     # Set device
-    world_size = torch.cuda.device_count()
     if FLAGS.cuda_device_number is not None and torch.cuda.is_available():
       device = torch.device(f'cuda:{int(FLAGS.cuda_device_number)}')
-    predict(device, FLAGS, flags=myflags, world_size=world_size)
+    predict(device)
 
 
 if __name__ == '__main__':
