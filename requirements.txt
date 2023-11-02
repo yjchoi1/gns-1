@@ -12,3 +12,5 @@ torch_scatter
 torch-cluster
 tqdm
 toml
+alphashape
+descartes
