@@ -9,6 +9,7 @@ import torch.utils.checkpoint
 from example.inverse_barrier.forward import rollout_with_checkpointing
 from example.inverse_problem.utils import To_Torch_Model_Param
 from example.inverse_barrier.utils import *
+import optimizations
 
 from gns import reading_utils
 from gns import train
@@ -16,17 +17,18 @@ from gns import train
 path = "data/"
 
 # Inputs for optimization
-nepoch = 10
-checkpoint_interval = 1
-lr = 1.0
+optimizer_type = "adam"  # adam or lbfgs
+nepoch = 15
+lr = 0.01  # use 0.5 - 1.0 for lbfgs and 0.01 or smaller to adam
 # initial location guess of barriers
-barrier_locations = [[0.9, 0.2], [0.9, 0.7]]  # x and z at lower edge
+barrier_locations = [[1.0, 0.20], [0.9, 0.7]]  # x and z at lower edge
+# prescribed constraints for barrier geometry
 barrier_info = {
     "barrier_height": 0.2,
     "barrier_width": 0.1,
-    "base_height": 0.1  # lower boundary of the simulation domain
+    "base_height": 0.1,  # lower boundary of the simulation domain
+    "search_area": [[0.7, 1.0], [0.2, 0.7]]
 }
-search_area = [[0.75, 0.15], [0.1, 0.3], [0.1, 0.9]]
 n_farthest_particles = 100
 
 # inputs for ground truth
@@ -34,6 +36,8 @@ ground_truth_npz = "trajectory0.npz"
 ground_truth_mpm_inputfile = "mpm_input.json"
 
 # Inputs for forward simulator
+nsteps = 250
+checkpoint_interval = 1
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 noise_std = 6.7e-4  # hyperparameter used to train GNS.
 NUM_PARTICLE_TYPES = 9
@@ -49,7 +53,7 @@ resume_epoch = 1
 
 # Save options
 output_dir = "data/outputs/"
-save_step = 1
+save_step = 10
 # Set output folder
 if not os.path.exists(f"{output_dir}"):
     os.makedirs(f"{output_dir}")
@@ -100,9 +104,14 @@ barrier_locs_torch = torch.tensor(
 barrier_locs_param = To_Torch_Model_Param(barrier_locs_torch)
 
 # Set up the optimizer
-optimizer = torch.optim.LBFGS(barrier_locs_param.parameters(), lr=lr, history_size=100)
+if optimizer_type == "lbfgs":
+    optimizer = torch.optim.LBFGS(barrier_locs_param.parameters(), lr=lr, history_size=100)
+elif optimizer_type == "adam":
+    optimizer = torch.optim.Adam(barrier_locs_param.parameters(), lr=lr)
+else:
+    raise ValueError("Check `optimizer_type`")
 
-# Resume
+# Resume TODO (yc): depends on optimizer type
 if resume:
     print(f"Resume from the previous state: epoch{resume_epoch}")
     checkpoint = torch.load(f"{output_dir}/optimizer_state-{resume_epoch}.pt")
@@ -115,119 +124,56 @@ barrier_locs = barrier_locs_param.current_params
 
 # Start optimization iteration
 for epoch in range(start_epoch, nepoch):
-    print(f"Epoch outside closure: {epoch}")
-    start = time.time()
 
-    # Variables to that saves variables in closure during optimization
-    values_for_save = {}  # variables to save as outputs
-    values_for_vis = {"pred": {}, "true": {}}   # variables just for visualize current optimization state
+    if optimizer_type == "lbfgs":
+        barrier_locs, _ = optimizations.lbfgs(
+            simulator,
+            nsteps,
+            mpm_inputs,
+            epoch,
+            checkpoint_interval,
+            runout_end_true,
+            n_farthest_particles,
+            kinematic_positions,
+            barrier_info,
+            barrier_particles,
+            barrier_locs,
+            barrier_locs_true,
+            optimizer,
+            output_dir,
+            device)
 
-    def closure():
-        print(f"Epoch in closure: {epoch}")
-        optimizer.zero_grad()  # Clear previous gradients
+    elif optimizer_type == "adam":
+        barrier_locs, _ = optimizations.adam(
+            simulator,
+            nsteps,
+            mpm_inputs,
+            epoch,
+            checkpoint_interval,
+            runout_end_true,
+            n_farthest_particles,
+            kinematic_positions,
+            barrier_info,
+            barrier_particles,
+            barrier_locs,
+            barrier_locs_true,
+            optimizer,
+            output_dir,
+            device)
 
-        # Make current barrier particles with the current locations
-        base_height = torch.tensor(barrier_info["base_height"])
-        current_barrier_particles = get_barrier_particles(
-            barrier_particles, barrier_locs, base_height)
-
-        # Make X0 with current barrier particles
-        current_initial_positions, current_particle_type, current_n_particles_per_example = get_features(
-            kinematic_positions, current_barrier_particles, device)
-
-        # GNS rollout
-        predicted_positions = rollout_with_checkpointing(
-            simulator=simulator,
-            initial_positions=current_initial_positions,
-            particle_types=current_particle_type,
-            n_particles_per_example=current_n_particles_per_example,
-            nsteps=250,
-            checkpoint_interval=checkpoint_interval,
-            knwon_positions=current_initial_positions[:, 0, :]
-        )
-
-        # Get predicted position at the last timestep
-        kinematic_positions_pred, stationary_positions_pred = get_positions_by_type(
-            predicted_positions, current_particle_type)
-        runout_end_pred = get_runout_end(
-            kinematic_positions_pred[-1], n_farthest_particles)
-
-        # Compute loss with before update
-        # TODO (yc): regularization and constraint for loss
-        loss = torch.mean((runout_end_pred - runout_end_true)**2)
-        print(f"True barrier locations: {barrier_locs_true}")
-        print(f"Epoch {epoch}:")
-        print(f"loss {loss.item():.8f}")
-
-        # Save necessary variables to visualize current optimization state
-        values_for_vis["pred"]["kinematic_positions"] = kinematic_positions_pred  # torch.tensor
-        values_for_vis["pred"]["runout_end"] = runout_end_pred  # torch.tensor
-        values_for_vis["pred"]["barrier_locs"] = barrier_locs  # torch.tensor
-        values_for_vis["true"]["kinematic_positions"] = kinematic_positions  # torch.tensor
-        values_for_vis["true"]["runout_end"] = runout_end_true  # torch.tensor
-        values_for_vis["true"]["barrier_locs"] = torch.tensor(barrier_locs_true)  # torch.tensor
-
-        # Vis
-        visualize_state(
-            vis_data=values_for_vis,
-            barrier_info=barrier_info,
-            mpm_inputs=mpm_inputs,
-            write_path=f"{output_dir}/status-{epoch}.png")
-        # Animation
-        if epoch % save_step == 0:
-            render_animation(
-                predicted_positions,
-                current_particle_type,
-                mpm_inputs,
-                timestep_stride=10,
-                write_path=f"{output_dir}/trj-{epoch}.gif")
-
-        # Save necessary variables to save as output
-        values_for_save["current_barrier_loc"] = barrier_locs.clone().detach().cpu().numpy()
-        values_for_save["predicted_positions"] = predicted_positions.clone().detach().cpu().numpy()
-        values_for_save["particle_type"] = current_particle_type.clone().detach().cpu().numpy()
-
-        # Update barrier locations
-        print("Backpropagate...")
-        loss.backward()
-        # Print updated barrier locations
-        print(f"Updated barrier locations: {barrier_locs.detach().cpu().numpy()}")
-
-        # Save updated state
-        values_for_save["updated_barrier_loc"] = barrier_locs.clone().detach().cpu().numpy()
-
-        return loss
-
-    # Perform optimization step
-    loss = optimizer.step(closure)
-
-    # Measure time for an iteration
-    end = time.time()
-    time_for_iteration = end - start
-
-    # Save optimizer state
-    torch.save({
-        'epoch': epoch,
-        'loss': loss.item(),
-        'time_spent': time_for_iteration,
-        'save_values': values_for_save,
-        'updated_barrier_loc_state_dict': To_Torch_Model_Param(barrier_locs).state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-    }, f"{output_dir}/optimizer_state-{epoch}.pt")
-
-
-
+    else:
+        raise ValueError("Check `optimizer type`")
 
 
     #
-    # # TODO (yc): utils.visualizer
-    #
-    # # Perform optimization step
-    # optimizer.step()
-
-
-
-    # Save and report optimization status
+    # # Save animation after epoch
+    # if epoch % save_step == 0:
+    #     render_animation(
+    #         predicted_positions,
+    #         current_particle_type,
+    #         mpm_inputs,
+    #         timestep_stride=10,
+    #         write_path=f"{output_dir}/trj-{epoch}.gif")
 
 
 

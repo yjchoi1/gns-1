@@ -82,23 +82,23 @@ def visualize_state(
         vis_data: dict,
         barrier_info: dict,
         mpm_inputs: dict,
+        loss: float,
         write_path: str
 ):
 
     barrier_height = barrier_info["barrier_height"]
     barrier_width = barrier_info["barrier_width"]
-    barriers_geometry_true = mpm_inputs["gen_cube_from_data"]["sim_inputs"][0]["obstacles"]["cubes"]
 
     vis_params = {
         "pred": {
             "label": "Pred",
-            "perimeter_color": "red",
+            "perimeter_color": "black",
             "particle_color": "purple",
             "alpha": 0.5
         },
         "true": {
             "label": "True",
-            "perimeter_color": "black",
+            "perimeter_color": "darkorange",
             "particle_color": "yellow",
             "alpha": 0.5
         }
@@ -124,7 +124,7 @@ def visualize_state(
                 height=barrier_width,
                 edgecolor=vis_params[key]["perimeter_color"],
                 fill=False,
-                linewidth=2
+                linewidth=1.5
             )
             barrier_patches.append(barrier_patch)
 
@@ -159,6 +159,7 @@ def visualize_state(
     ax.set_xlim(mpm_inputs['sim_space'][0])
     ax.set_ylim(mpm_inputs['sim_space'][2])
     ax.set_aspect("equal")
+    ax.set_title(f"Loss: {loss:.3e}")
     ax.legend()
     ax.grid(True)
     # plt.show()
@@ -206,7 +207,7 @@ def get_features(
     return initial_positions, particle_type, n_particles_per_example
 
 
-def get_barrier_particles(
+def locate_barrier_particles(
         barrier_particles: torch.tensor,
         barrier_locations: torch.tensor,
         base_height: torch.tensor
