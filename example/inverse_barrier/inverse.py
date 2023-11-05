@@ -17,26 +17,27 @@ from gns import train
 path = "data/"
 
 # Inputs for optimization
-optimizer_type = "adam"  # adam or lbfgs
-nepoch = 15
-lr = 0.01  # use 0.5 - 1.0 for lbfgs and 0.01 or smaller to adam
+optimizer_type = "lbfgs"  # adam or lbfgs
+loss_mesure = "farthest_positions"  # `farthest_positions` or `centroid`
+niterations = 15
+lr = 0.1  # use 0.5 - 1.0 for lbfgs and 0.01 or smaller to adam
 # initial location guess of barriers
-barrier_locations = [[1.0, 0.20], [0.9, 0.7]]  # x and z at lower edge
+barrier_locations = [[0.8, 0.50], [0.8, 0.70]]  # x and z at lower edge
 # prescribed constraints for barrier geometry
 barrier_info = {
     "barrier_height": 0.2,
     "barrier_width": 0.1,
     "base_height": 0.1,  # lower boundary of the simulation domain
-    "search_area": [[0.7, 1.0], [0.2, 0.7]]
+    "search_area": [[0.75, 0.85], [0.10, 0.90]]
 }
-n_farthest_particles = 100
+n_farthest_particles = 200
 
 # inputs for ground truth
 ground_truth_npz = "trajectory0.npz"
 ground_truth_mpm_inputfile = "mpm_input.json"
 
 # Inputs for forward simulator
-nsteps = 250
+nsteps = 350 - 6
 checkpoint_interval = 1
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 noise_std = 6.7e-4  # hyperparameter used to train GNS.
@@ -52,7 +53,7 @@ resume = False
 resume_epoch = 1
 
 # Save options
-output_dir = "data/outputs/"
+output_dir = "data/outputs-lbfgs-far1/"
 save_step = 10
 # Set output folder
 if not os.path.exists(f"{output_dir}"):
@@ -97,6 +98,8 @@ barrier_particles = fill_cuboid_with_particles(
 # Get ground truth particle positions at the last timestep for `n_farthest_particles` to compute loss
 runout_end_true = get_runout_end(
     kinematic_positions[-1], n_farthest_particles).to(device)
+# Get ground truth centroid of particle positions at the last timestep
+centroid_true = torch.mean(kinematic_positions[-1], dim=0)
 
 # Initialize barrier locations
 barrier_locs_torch = torch.tensor(
@@ -105,7 +108,8 @@ barrier_locs_param = To_Torch_Model_Param(barrier_locs_torch)
 
 # Set up the optimizer
 if optimizer_type == "lbfgs":
-    optimizer = torch.optim.LBFGS(barrier_locs_param.parameters(), lr=lr, history_size=100)
+    optimizer = torch.optim.LBFGS(barrier_locs_param.parameters(),
+                                  lr=lr, max_iter=niterations, history_size=100)
 elif optimizer_type == "adam":
     optimizer = torch.optim.Adam(barrier_locs_param.parameters(), lr=lr)
 else:
@@ -113,9 +117,9 @@ else:
 
 # Resume TODO (yc): depends on optimizer type
 if resume:
-    print(f"Resume from the previous state: epoch{resume_epoch}")
+    print(f"Resume from the previous state: iteration{resume_epoch}")
     checkpoint = torch.load(f"{output_dir}/optimizer_state-{resume_epoch}.pt")
-    start_epoch = checkpoint["epoch"]
+    start_epoch = checkpoint["iteration"]
     barrier_locs_param.load_state_dict(checkpoint['updated_barrier_loc_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 else:
@@ -123,34 +127,37 @@ else:
 barrier_locs = barrier_locs_param.current_params
 
 # Start optimization iteration
-for epoch in range(start_epoch, nepoch):
+if optimizer_type == "lbfgs":
+    barrier_locs, _ = optimizations.lbfgs(
+        loss_mesure,
+        simulator,
+        nsteps,
+        mpm_inputs,
+        niterations,
+        checkpoint_interval,
+        runout_end_true,
+        centroid_true,
+        n_farthest_particles,
+        kinematic_positions,
+        barrier_info,
+        barrier_particles,
+        barrier_locs,
+        barrier_locs_true,
+        optimizer,
+        output_dir,
+        device)
 
-    if optimizer_type == "lbfgs":
-        barrier_locs, _ = optimizations.lbfgs(
-            simulator,
-            nsteps,
-            mpm_inputs,
-            epoch,
-            checkpoint_interval,
-            runout_end_true,
-            n_farthest_particles,
-            kinematic_positions,
-            barrier_info,
-            barrier_particles,
-            barrier_locs,
-            barrier_locs_true,
-            optimizer,
-            output_dir,
-            device)
-
-    elif optimizer_type == "adam":
+elif optimizer_type == "adam":
+    for iteration in range(start_epoch, niterations):
         barrier_locs, _ = optimizations.adam(
+            loss_mesure,
             simulator,
             nsteps,
             mpm_inputs,
-            epoch,
+            iteration,
             checkpoint_interval,
             runout_end_true,
+            centroid_true,
             n_farthest_particles,
             kinematic_positions,
             barrier_info,
@@ -161,19 +168,19 @@ for epoch in range(start_epoch, nepoch):
             output_dir,
             device)
 
-    else:
-        raise ValueError("Check `optimizer type`")
+else:
+    raise ValueError("Check `optimizer type`")
 
 
-    #
-    # # Save animation after epoch
-    # if epoch % save_step == 0:
+    # TODO (yc): When to save animation?
+    # # Save animation after iteration
+    # if iteration % save_step == 0:
     #     render_animation(
     #         predicted_positions,
     #         current_particle_type,
     #         mpm_inputs,
     #         timestep_stride=10,
-    #         write_path=f"{output_dir}/trj-{epoch}.gif")
+    #         write_path=f"{output_dir}/trj-{iteration}.gif")
 
 
 

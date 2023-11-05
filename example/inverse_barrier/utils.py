@@ -85,6 +85,19 @@ def visualize_state(
         loss: float,
         write_path: str
 ):
+    """
+    Make runout comparison plot
+    Args:
+        vis_data (dict): data for visualization following a specific format
+        barrier_info (dict): prescribed barrier geometry information.
+            It is used to make a rectangular patch in fig to represent barriers
+        mpm_inputs (dict): used to get simulation domain boundary
+        loss (float):
+        write_path (str):
+
+    Returns:
+
+    """
 
     barrier_height = barrier_info["barrier_height"]
     barrier_width = barrier_info["barrier_width"]
@@ -112,7 +125,10 @@ def visualize_state(
         last_position = value["kinematic_positions"][-1].detach().cpu().numpy()
         runout_perimeter = alphashape.alphashape(
             last_position[:, [0, 2]], alpha=20.0)  # smaller alpha fit more tight
-        runout_end = value["runout_end"].detach().cpu().numpy()
+        if "runout_end" in value:
+            runout_end = value["runout_end"].detach().cpu().numpy()
+        if "centroid" in value:
+            centroid = value["centroid"].detach().cpu().numpy()
 
         # Get rectangular patches for pred barriers
         barrier_patches = []
@@ -124,19 +140,26 @@ def visualize_state(
                 height=barrier_width,
                 edgecolor=vis_params[key]["perimeter_color"],
                 fill=False,
-                linewidth=1.5
+                linewidth=1.5,
+                zorder=10
             )
             barrier_patches.append(barrier_patch)
 
         # Plot runout
         ax.scatter(last_position[:, 0], last_position[:, 2],
-                   alpha=0.5, s=2.0, c=vis_params[key]["particle_color"])
+                   alpha=0.3, s=2.0, c=vis_params[key]["particle_color"])
 
         # Plot runout end used in loss calculation
-        ax.scatter(runout_end[:, 0], runout_end[:, 2],
-                   s=5.0,
-                   c=vis_params[key]["particle_color"],
-                   edgecolors=vis_params[key]["perimeter_color"])
+        if "runout_end" in value:
+            ax.scatter(runout_end[:, 0], runout_end[:, 2],
+                       s=5.0,
+                       c=vis_params[key]["particle_color"],
+                       edgecolors=vis_params[key]["perimeter_color"])
+        if "centroid" in value:
+            ax.scatter(centroid[0], centroid[2],
+                       s=10.0,
+                       c=vis_params[key]["particle_color"],
+                       edgecolors=vis_params[key]["perimeter_color"])
 
         ### Plot runout fill. Simple `PolygonPath` doesn't work in the current version of the package
         # ax.add_patch(PolygonPatch(runout_perimeter, alpha=0.2))
@@ -301,7 +324,9 @@ def fill_cuboid_with_particles(
     particles = np.stack([X.flatten(), Y.flatten(), Z.flatten()], axis=1)
 
     # Disturbance
-    disturbance = np.random.uniform(-spacing/2, spacing/2, size=particles.shape) * random_disturbance_mag
+    disturbance = np.random.uniform(-spacing/2 * random_disturbance_mag,
+                                    spacing/2 * random_disturbance_mag,
+                                    size=particles.shape)
     disturbed_particles = particles + disturbance
     torch_particles = torch.tensor(disturbed_particles, requires_grad=True)
 

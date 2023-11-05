@@ -5,17 +5,17 @@ from forward import rollout_with_checkpointing
 from example.inverse_problem.utils import To_Torch_Model_Param
 
 
-
-
-
+SAVE_STEP = 1
 
 def lbfgs(
+        loss_mesure,
         simulator,
         nsteps,
         mpm_inputs,
-        epoch,
+        niterations,
         checkpoint_interval,
         runout_end_true,
+        centroid_true,
         n_farthest_particles,
         kinematic_positions,
         barrier_info,
@@ -38,7 +38,7 @@ def lbfgs(
 
         closure_count += 1
 
-        print(f"Epoch: {epoch}, closure: {closure_count} -----------------------------")
+        print(f"Closure: {closure_count} -----------------------------")
         print(f"True barrier locations: {barrier_locs_true}")
 
         optimizer.zero_grad()  # Clear previous gradients
@@ -68,31 +68,42 @@ def lbfgs(
             predicted_positions, current_particle_type)
         runout_end_pred = get_runout_end(
             kinematic_positions_pred[-1], n_farthest_particles)
+        centroid_pred = torch.mean(kinematic_positions_pred[-1], dim=0)
 
         # Compute loss with before update
-        loss = torch.mean((runout_end_pred - runout_end_true)**2)
+        if loss_mesure == "farthest_positions":
+            loss = torch.mean((runout_end_pred - runout_end_true)**2)
+        elif loss_mesure == "centroid":
+            loss = torch.mean((centroid_pred - centroid_true)**2)
+        else:
+            raise ValueError("Check loss measure. Should be `farthest_positions` or `centroid`")
+
         print(f"loss {loss.item():.8f}")
 
         # Save necessary variables to visualize current optimization state
         values_for_vis["pred"]["kinematic_positions"] = kinematic_positions_pred  # torch.tensor
         values_for_vis["pred"]["runout_end"] = runout_end_pred  # torch.tensor
         values_for_vis["pred"]["barrier_locs"] = barrier_locs  # torch.tensor
+        values_for_vis["pred"]["centroid"] = centroid_true  # torch.tensor
         values_for_vis["true"]["kinematic_positions"] = kinematic_positions  # torch.tensor
         values_for_vis["true"]["runout_end"] = runout_end_true  # torch.tensor
         values_for_vis["true"]["barrier_locs"] = torch.tensor(barrier_locs_true)  # torch.tensor
+        values_for_vis["pred"]["centroid"] = centroid_pred  # torch.tensor
 
-        # Save status plot for every epoch and closure call
+        # Save status plot for every iteration and closure call
         visualize_state(
             vis_data=values_for_vis,
             barrier_info=barrier_info,
             mpm_inputs=mpm_inputs,
             loss=loss.item(),
-            write_path=f"{output_dir}/status-e{epoch}-c{closure_count}.png")
+            write_path=f"{output_dir}/status-e{closure_count}.png")
 
         # Save necessary variables to save as output
         values_for_save["current_barrier_loc"] = barrier_locs.clone().detach().cpu().numpy()
         values_for_save["predicted_positions"] = predicted_positions.clone().detach().cpu().numpy()
         values_for_save["particle_type"] = current_particle_type.clone().detach().cpu().numpy()
+        values_for_save["barrier_info"] = barrier_info
+        values_for_save["n_farthest_particles"] = n_farthest_particles
 
         # Update barrier locations
         print("Backpropagate...")
@@ -109,37 +120,49 @@ def lbfgs(
 
         # Save optimizer state
         torch.save({
-            'epoch': epoch,
+            'iteration': closure_count,
             'loss': loss.item(),
             'time_spent': time_for_iteration,
             'save_values': values_for_save,
             'updated_barrier_loc_state_dict': To_Torch_Model_Param(barrier_locs).state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
-        }, f"{output_dir}/optimizer_state-e{epoch}-c{closure_count}.pt")
+        }, f"{output_dir}/optimizer_state-e{closure_count}.pt")
+
+        # Save animation after iteration
+        if closure_count % SAVE_STEP == 0:
+            render_animation(
+                predicted_positions,
+                current_particle_type,
+                mpm_inputs,
+                timestep_stride=10,
+                write_path=f"{output_dir}/trj-{closure_count}.gif")
 
         return loss
 
     # Perform optimization step
-    optimizer.step(closure)
+    while closure_count < niterations:
+        optimizer.step(closure)
 
-    # Enforce the boundary constraints
-    boundary_constraints = barrier_info["search_area"]
-    with torch.no_grad():  # Make sure gradients are not computed for this operation
-        barrier_locs[:, 0].clamp_(
-            min=boundary_constraints[0][0], max=boundary_constraints[0][1])
-        barrier_locs[:, 1].clamp_(
-            min=boundary_constraints[1][0], max=boundary_constraints[1][1])
+        # Enforce the boundary constraints
+        boundary_constraints = barrier_info["search_area"]
+        with torch.no_grad():  # Make sure gradients are not computed for this operation
+            barrier_locs[:, 0].clamp_(
+                min=boundary_constraints[0][0], max=boundary_constraints[0][1])
+            barrier_locs[:, 1].clamp_(
+                min=boundary_constraints[1][0], max=boundary_constraints[1][1])
 
     return barrier_locs, values_for_save
 
 
 def adam(
+        loss_mesure,
         simulator,
         nsteps,
         mpm_inputs,
-        epoch,
+        iteration,
         checkpoint_interval,
         runout_end_true,
+        centroid_true,
         n_farthest_particles,
         kinematic_positions,
         barrier_info,
@@ -185,31 +208,40 @@ def adam(
         predicted_positions, current_particle_type)
     runout_end_pred = get_runout_end(
         kinematic_positions_pred[-1], n_farthest_particles)
+    centroid_pred = torch.mean(kinematic_positions_pred[-1], dim=0)
 
     # Compute loss with before update
-    loss = torch.mean((runout_end_pred - runout_end_true) ** 2)
-    print(f"loss {loss.item():.8f}")
+    if loss_mesure == "farthest_positions":
+        loss = torch.mean((runout_end_pred - runout_end_true) ** 2)
+    elif loss_mesure == "centroid":
+        loss = torch.mean((centroid_pred - centroid_true) ** 2)
+    else:
+        raise ValueError("Check loss measure. Should be `farthest_positions` or `centroid`")
 
     # Save necessary variables to visualize current optimization state
     values_for_vis["pred"]["kinematic_positions"] = kinematic_positions_pred  # torch.tensor
     values_for_vis["pred"]["runout_end"] = runout_end_pred  # torch.tensor
     values_for_vis["pred"]["barrier_locs"] = barrier_locs  # torch.tensor
+    values_for_vis["pred"]["centroid"] = centroid_true  # torch.tensor
     values_for_vis["true"]["kinematic_positions"] = kinematic_positions  # torch.tensor
     values_for_vis["true"]["runout_end"] = runout_end_true  # torch.tensor
     values_for_vis["true"]["barrier_locs"] = torch.tensor(barrier_locs_true)  # torch.tensor
+    values_for_vis["pred"]["centroid"] = centroid_pred  # torch.tensor
 
-    # Save status plot for every epoch and closure call
+    # Save status plot for every iteration and closure call
     visualize_state(
         vis_data=values_for_vis,
         barrier_info=barrier_info,
         mpm_inputs=mpm_inputs,
         loss=loss.item(),
-        write_path=f"{output_dir}/status-e{epoch}.png")
+        write_path=f"{output_dir}/status-e{iteration}.png")
 
     # Save necessary variables to save as output
     values_for_save["current_barrier_loc"] = barrier_locs.clone().detach().cpu().numpy()
     values_for_save["predicted_positions"] = predicted_positions.clone().detach().cpu().numpy()
     values_for_save["particle_type"] = current_particle_type.clone().detach().cpu().numpy()
+    values_for_save["barrier_info"] = barrier_info
+    values_for_save["n_farthest_particles"] = n_farthest_particles
 
     # Update barrier locations
     print("Backpropagate...")
@@ -226,13 +258,13 @@ def adam(
 
     # Save optimizer state
     torch.save({
-        'epoch': epoch,
+        'iteration': iteration,
         'loss': loss.item(),
         'time_spent': time_for_iteration,
         'save_values': values_for_save,
         'updated_barrier_loc_state_dict': To_Torch_Model_Param(barrier_locs).state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-    }, f"{output_dir}/optimizer_state-e{epoch}.pt")
+    }, f"{output_dir}/optimizer_state-e{iteration}.pt")
 
     # Perform optimization step
     optimizer.step()
@@ -244,6 +276,16 @@ def adam(
             min=boundary_constraints[0][0], max=boundary_constraints[0][1])
         barrier_locs[:, 1].clamp_(
             min=boundary_constraints[1][0], max=boundary_constraints[1][1])
+
+    # Save animation after iteration
+    if iteration % SAVE_STEP == 0:
+        render_animation(
+            predicted_positions,
+            current_particle_type,
+            mpm_inputs,
+            timestep_stride=10,
+            write_path=f"{output_dir}/trj-{iteration}.gif")
+
 
     return barrier_locs, values_for_save
 

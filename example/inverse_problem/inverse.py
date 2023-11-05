@@ -54,7 +54,7 @@ save_step = inputs["output"]['save_step']
 
 # resume
 resume = inputs["resume"]['resume']
-resume_epoch = inputs["resume"]['epoch']
+resume_epoch = inputs["resume"]['iteration']
 
 
 # Load simulator
@@ -113,9 +113,9 @@ if not os.path.exists(f"{output_dir}"):
 
 # Resume
 if resume:
-    print(f"Resume from the previous state: epoch{resume_epoch}")
+    print(f"Resume from the previous state: iteration{resume_epoch}")
     checkpoint = torch.load(f"{output_dir}/optimizer_state-{resume_epoch}.pt")
-    start_epoch = checkpoint["epoch"]
+    start_epoch = checkpoint["iteration"]
     initial_velocity_x_model.load_state_dict(checkpoint['velocity_x_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 else:
@@ -186,7 +186,7 @@ for epoch in range(start_epoch+1, nepoch):
     # Save and report optimization status
     if epoch % save_step == 0:
 
-        # Make animation at the last epoch
+        # Make animation at the last iteration
         if epoch == nepoch - 1:
             print(f"Rendering animation at {epoch}...")
             positions_np = np.concatenate(
@@ -200,7 +200,7 @@ for epoch in range(start_epoch+1, nepoch):
 
         # Save history
         current_history = {
-            "epoch": epoch,
+            "iteration": epoch,
             "lr": optimizer.state_dict()["param_groups"][0]["lr"],
             "initial_velocity_x": initial_velocity_x.detach().cpu().numpy(),
             "loss": loss.item()
@@ -208,7 +208,7 @@ for epoch in range(start_epoch+1, nepoch):
 
         # Save optimizer state
         torch.save({
-            'epoch': epoch,
+            'iteration': epoch,
             'time_spent': time_for_iteration,
             'position_state_dict': {
                 "target_positions": mpm_trajectory[0][0],
