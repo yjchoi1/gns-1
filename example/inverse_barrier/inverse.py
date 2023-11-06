@@ -20,9 +20,9 @@ path = "data/"
 optimizer_type = "lbfgs"  # adam or lbfgs
 loss_mesure = "farthest_positions"  # `farthest_positions` or `centroid`
 niterations = 15
-lr = 1.0  # use 0.5 - 1.0 for lbfgs and 0.01 or smaller to adam
+lr = 0.1  # use 0.5 - 1.0 for lbfgs and 0.01 or smaller to adam
 # initial location guess of barriers
-barrier_locations = np.array([[0.8, 0.50], [0.8, 0.70]])  # x and z at lower edge
+barrier_locations = [[0.8, 0.50], [0.8, 0.70]]  # x and z at lower edge
 # prescribed constraints for barrier geometry
 barrier_info = {
     "barrier_height": 0.2,
@@ -37,7 +37,7 @@ ground_truth_npz = "trajectory0.npz"
 ground_truth_mpm_inputfile = "mpm_input.json"
 
 # Inputs for forward simulator
-nsteps = 150 - 6
+nsteps = 350 - 6
 checkpoint_interval = 1
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 noise_std = 6.7e-4  # hyperparameter used to train GNS.
@@ -77,7 +77,6 @@ barrier_locs_true = []
 for geometry in barrier_geometries_true:
     loc = [geometry[0], geometry[2]]
     barrier_locs_true.append(loc)
-barrier_locs_true = torch.tensor(barrier_locs_true).to(device)
 
 # Get particle positions
 mpm_trajectory = [item for _, item in np.load(f"{path}/{ground_truth_npz}", allow_pickle=True).items()]
@@ -103,16 +102,16 @@ runout_end_true = get_runout_end(
 centroid_true = torch.mean(kinematic_positions[-1], dim=0)
 
 # Initialize barrier locations
-barrier_zlocs_torch = torch.tensor(
-    barrier_locations[:, 1], requires_grad=True, device=device)
-barrier_zlocs_param = To_Torch_Model_Param(barrier_zlocs_torch)
+barrier_locs_torch = torch.tensor(
+    barrier_locations, requires_grad=True, device=device)
+barrier_locs_param = To_Torch_Model_Param(barrier_locs_torch)
 
 # Set up the optimizer
 if optimizer_type == "lbfgs":
-    optimizer = torch.optim.LBFGS(barrier_zlocs_param.parameters(),
+    optimizer = torch.optim.LBFGS(barrier_locs_param.parameters(),
                                   lr=lr, max_iter=niterations, history_size=100)
 elif optimizer_type == "adam":
-    optimizer = torch.optim.Adam(barrier_zlocs_param.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(barrier_locs_param.parameters(), lr=lr)
 else:
     raise ValueError("Check `optimizer_type`")
 
@@ -121,37 +120,36 @@ if resume:
     print(f"Resume from the previous state: iteration{resume_epoch}")
     checkpoint = torch.load(f"{output_dir}/optimizer_state-{resume_epoch}.pt")
     start_epoch = checkpoint["iteration"]
-    barrier_zlocs_param.load_state_dict(checkpoint['updated_barrier_loc_state_dict'])
+    barrier_locs_param.load_state_dict(checkpoint['updated_barrier_loc_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 else:
     start_epoch = 0
-barrier_zlocs = barrier_zlocs_param.current_params
+barrier_locs = barrier_locs_param.current_params
 
 # Start optimization iteration
 if optimizer_type == "lbfgs":
-    barrier_zlocs, _ = optimizations.lbfgs(
-        loss_mesure=loss_mesure,
-        simulator=simulator,
-        nsteps=nsteps,
-        mpm_inputs=mpm_inputs,
-        niterations=niterations,
-        checkpoint_interval=checkpoint_interval,
-        runout_end_true=runout_end_true,
-        centroid_true=centroid_true,
-        n_farthest_particles=n_farthest_particles,
-        kinematic_positions=kinematic_positions,
-        barrier_info=barrier_info,
-        barrier_particles=barrier_particles,
-        barrier_zlocs=barrier_zlocs,
-        barrier_locs_true=barrier_locs_true,
-        optimizer=optimizer,
-        output_dir=output_dir,
-        device=device)
+    barrier_locs, _ = optimizations.lbfgs(
+        loss_mesure,
+        simulator,
+        nsteps,
+        mpm_inputs,
+        niterations,
+        checkpoint_interval,
+        runout_end_true,
+        centroid_true,
+        n_farthest_particles,
+        kinematic_positions,
+        barrier_info,
+        barrier_particles,
+        barrier_locs,
+        barrier_locs_true,
+        optimizer,
+        output_dir,
+        device)
 
-# TODO (yc): update corresponding to the z-only parameter optimization
 elif optimizer_type == "adam":
     for iteration in range(start_epoch, niterations):
-        barrier_zlocs, _ = optimizations.adam(
+        barrier_locs, _ = optimizations.adam(
             loss_mesure,
             simulator,
             nsteps,
@@ -164,7 +162,7 @@ elif optimizer_type == "adam":
             kinematic_positions,
             barrier_info,
             barrier_particles,
-            barrier_zlocs,
+            barrier_locs,
             barrier_locs_true,
             optimizer,
             output_dir,

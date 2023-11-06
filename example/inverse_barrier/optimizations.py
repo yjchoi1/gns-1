@@ -20,7 +20,7 @@ def lbfgs(
         kinematic_positions,
         barrier_info,
         barrier_particles,
-        barrier_zlocs,
+        barrier_locs,
         barrier_locs_true,
         optimizer,
         output_dir,
@@ -31,15 +31,10 @@ def lbfgs(
     values_for_vis = {"pred": {}, "true": {}}   # variables just for visualize current optimization state
 
     closure_count = 0
-    barrier_xlocs = barrier_locs_true[:, 0]
 
     def closure():
         nonlocal closure_count
         start = time.time()
-
-        # input parameter is z-locations only
-        barrier_locs = torch.stack(
-            (barrier_xlocs, barrier_zlocs), dim=1)
 
         closure_count += 1
 
@@ -51,7 +46,7 @@ def lbfgs(
         # Make current barrier particles with the current locations
         base_height = torch.tensor(barrier_info["base_height"])
         current_barrier_particles = locate_barrier_particles(
-            barrier_particles, barrier_locs.clone().detach().tolist(), base_height)
+            barrier_particles, barrier_locs, base_height)
 
         # Make X0 with current barrier particles
         current_initial_positions, current_particle_type, current_n_particles_per_example = get_features(
@@ -92,7 +87,7 @@ def lbfgs(
         values_for_vis["pred"]["centroid"] = centroid_true  # torch.tensor
         values_for_vis["true"]["kinematic_positions"] = kinematic_positions  # torch.tensor
         values_for_vis["true"]["runout_end"] = runout_end_true  # torch.tensor
-        values_for_vis["true"]["barrier_locs"] = barrier_locs_true  # torch.tensor
+        values_for_vis["true"]["barrier_locs"] = torch.tensor(barrier_locs_true)  # torch.tensor
         values_for_vis["pred"]["centroid"] = centroid_pred  # torch.tensor
 
         # Save status plot for every iteration and closure call
@@ -113,35 +108,34 @@ def lbfgs(
         # Update barrier locations
         print("Backpropagate...")
         loss.backward()
-        print(barrier_zlocs.grad)
         # Print updated barrier locations
-        print(f"Updated barrier locations: {barrier_locs.clone().detach().cpu().numpy()}")
-        #
-        # # Save updated variables to save as output
-        # values_for_save["updated_barrier_loc"] = barrier_locs.clone().detach().cpu().numpy()
-        #
-        # # Measure time for an iteration
-        # end = time.time()
-        # time_for_iteration = end - start
-        #
-        # # Save optimizer state
-        # torch.save({
-        #     'iteration': closure_count,
-        #     'loss': loss.item(),
-        #     'time_spent': time_for_iteration,
-        #     'save_values': values_for_save,
-        #     'updated_barrier_loc_state_dict': To_Torch_Model_Param(barrier_zlocs).state_dict(),
-        #     'optimizer_state_dict': optimizer.state_dict(),
-        # }, f"{output_dir}/optimizer_state-e{closure_count}.pt")
-        #
-        # # # Save animation after iteration
-        # if closure_count % SAVE_STEP == 0:
-        #     render_animation(
-        #         predicted_positions,
-        #         current_particle_type,
-        #         mpm_inputs,
-        #         timestep_stride=10,
-        #         write_path=f"{output_dir}/trj-{closure_count}.gif")
+        print(f"Updated barrier locations: {barrier_locs.detach().cpu().numpy()}")
+
+        # Save updated variables to save as output
+        values_for_save["updated_barrier_loc"] = barrier_locs.clone().detach().cpu().numpy()
+
+        # Measure time for an iteration
+        end = time.time()
+        time_for_iteration = end - start
+
+        # Save optimizer state
+        torch.save({
+            'iteration': closure_count,
+            'loss': loss.item(),
+            'time_spent': time_for_iteration,
+            'save_values': values_for_save,
+            'updated_barrier_loc_state_dict': To_Torch_Model_Param(barrier_locs).state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+        }, f"{output_dir}/optimizer_state-e{closure_count}.pt")
+
+        # Save animation after iteration
+        if closure_count % SAVE_STEP == 0:
+            render_animation(
+                predicted_positions,
+                current_particle_type,
+                mpm_inputs,
+                timestep_stride=10,
+                write_path=f"{output_dir}/trj-{closure_count}.gif")
 
         return loss
 
@@ -149,17 +143,17 @@ def lbfgs(
     while closure_count < niterations:
         optimizer.step(closure)
 
-        # # Enforce the boundary constraints
-        # boundary_constraints = barrier_info["search_area"]
-        # with torch.no_grad():  # Make sure gradients are not computed for this operation
-        #     barrier_locs[:, 0].clamp_(
-        #         min=boundary_constraints[0][0], max=boundary_constraints[0][1])
-        #     barrier_locs[:, 1].clamp_(
-        #         min=boundary_constraints[1][0], max=boundary_constraints[1][1])
+        # Enforce the boundary constraints
+        boundary_constraints = barrier_info["search_area"]
+        with torch.no_grad():  # Make sure gradients are not computed for this operation
+            barrier_locs[:, 0].clamp_(
+                min=boundary_constraints[0][0], max=boundary_constraints[0][1])
+            barrier_locs[:, 1].clamp_(
+                min=boundary_constraints[1][0], max=boundary_constraints[1][1])
 
-    return barrier_zlocs, values_for_save
+    return barrier_locs, values_for_save
 
-# TODO (yc): update corresponding to the z-only parameter optimization
+
 def adam(
         loss_mesure,
         simulator,
