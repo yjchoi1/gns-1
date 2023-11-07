@@ -18,11 +18,11 @@ path = "data/"
 
 # Inputs for optimization
 optimizer_type = "lbfgs"  # adam or lbfgs
-loss_mesure = "farthest_positions"  # `farthest_positions` or `centroid`
-niterations = 15
+loss_mesure = "centroid"  # `farthest_positions` or `centroid`
+niterations = 30
 lr = 0.1  # use 0.5 - 1.0 for lbfgs and 0.01 or smaller to adam
 # initial location guess of barriers
-barrier_locations = [[0.8, 0.50], [0.8, 0.70]]  # x and z at lower edge
+barrier_locations = [[0.8, 0.10], [0.8, 0.75]]  # x and z at lower edge
 # prescribed constraints for barrier geometry
 barrier_info = {
     "barrier_height": 0.2,
@@ -30,14 +30,14 @@ barrier_info = {
     "base_height": 0.1,  # lower boundary of the simulation domain
     "search_area": [[0.75, 0.85], [0.10, 0.90]]
 }
-n_farthest_particles = 200
+n_farthest_particles = 1
 
 # inputs for ground truth
 ground_truth_npz = "trajectory0.npz"
 ground_truth_mpm_inputfile = "mpm_input.json"
 
 # Inputs for forward simulator
-nsteps = 350 - 6
+nsteps = 354
 checkpoint_interval = 1
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 noise_std = 6.7e-4  # hyperparameter used to train GNS.
@@ -53,7 +53,7 @@ resume = False
 resume_epoch = 1
 
 # Save options
-output_dir = "data/outputs-lbfgs-far1/"
+output_dir = "data/outputs-lbfgs-centroid/"
 save_step = 10
 # Set output folder
 if not os.path.exists(f"{output_dir}"):
@@ -99,19 +99,20 @@ barrier_particles = fill_cuboid_with_particles(
 runout_end_true = get_runout_end(
     kinematic_positions[-1], n_farthest_particles).to(device)
 # Get ground truth centroid of particle positions at the last timestep
-centroid_true = torch.mean(kinematic_positions[-1], dim=0)
+centroid_true = torch.mean(kinematic_positions[-1], dim=0).to(device)
 
 # Initialize barrier locations
-barrier_locs_torch = torch.tensor(
-    barrier_locations, requires_grad=True, device=device)
-barrier_locs_param = To_Torch_Model_Param(barrier_locs_torch)
+barrier_zlocs_torch = torch.tensor(
+    [barrier_locations[0][1], barrier_locations[1][1]],
+    requires_grad=True, device=device)
+barrier_zlocs_param = To_Torch_Model_Param(barrier_zlocs_torch)
 
 # Set up the optimizer
 if optimizer_type == "lbfgs":
-    optimizer = torch.optim.LBFGS(barrier_locs_param.parameters(),
+    optimizer = torch.optim.LBFGS(barrier_zlocs_param.parameters(),
                                   lr=lr, max_iter=niterations, history_size=100)
 elif optimizer_type == "adam":
-    optimizer = torch.optim.Adam(barrier_locs_param.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(barrier_zlocs_param.parameters(), lr=lr)
 else:
     raise ValueError("Check `optimizer_type`")
 
@@ -120,15 +121,15 @@ if resume:
     print(f"Resume from the previous state: iteration{resume_epoch}")
     checkpoint = torch.load(f"{output_dir}/optimizer_state-{resume_epoch}.pt")
     start_epoch = checkpoint["iteration"]
-    barrier_locs_param.load_state_dict(checkpoint['updated_barrier_loc_state_dict'])
+    barrier_zlocs_param.load_state_dict(checkpoint['updated_barrier_loc_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 else:
     start_epoch = 0
-barrier_locs = barrier_locs_param.current_params
+barrier_zlocs = barrier_zlocs_param.current_params
 
 # Start optimization iteration
 if optimizer_type == "lbfgs":
-    barrier_locs, _ = optimizations.lbfgs(
+    optimizations.lbfgs(
         loss_mesure,
         simulator,
         nsteps,
@@ -141,12 +142,13 @@ if optimizer_type == "lbfgs":
         kinematic_positions,
         barrier_info,
         barrier_particles,
-        barrier_locs,
-        barrier_locs_true,
+        barrier_zlocs,
+        barrier_locs_true,  # list
         optimizer,
         output_dir,
         device)
 
+# TODO (yc): change corresponding to z-location optimization
 elif optimizer_type == "adam":
     for iteration in range(start_epoch, niterations):
         barrier_locs, _ = optimizations.adam(
@@ -162,7 +164,7 @@ elif optimizer_type == "adam":
             kinematic_positions,
             barrier_info,
             barrier_particles,
-            barrier_locs,
+            barrier_zlocs,
             barrier_locs_true,
             optimizer,
             output_dir,

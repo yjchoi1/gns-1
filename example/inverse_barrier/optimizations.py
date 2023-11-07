@@ -5,7 +5,7 @@ from forward import rollout_with_checkpointing
 from example.inverse_problem.utils import To_Torch_Model_Param
 
 
-SAVE_STEP = 1
+SAVE_STEP = 5
 
 def lbfgs(
         loss_mesure,
@@ -20,7 +20,7 @@ def lbfgs(
         kinematic_positions,
         barrier_info,
         barrier_particles,
-        barrier_locs,
+        barrier_zlocs,
         barrier_locs_true,
         optimizer,
         output_dir,
@@ -44,6 +44,9 @@ def lbfgs(
         optimizer.zero_grad()  # Clear previous gradients
 
         # Make current barrier particles with the current locations
+        barrier_xlocs_true = torch.tensor(
+            [barrier_locs_true[0][0], barrier_locs_true[1][0]]).to(device)
+        barrier_locs = torch.stack((barrier_xlocs_true, barrier_zlocs), dim=1)
         base_height = torch.tensor(barrier_info["base_height"])
         current_barrier_particles = locate_barrier_particles(
             barrier_particles, barrier_locs, base_height)
@@ -81,14 +84,23 @@ def lbfgs(
         print(f"loss {loss.item():.8f}")
 
         # Save necessary variables to visualize current optimization state
-        values_for_vis["pred"]["kinematic_positions"] = kinematic_positions_pred  # torch.tensor
-        values_for_vis["pred"]["runout_end"] = runout_end_pred  # torch.tensor
-        values_for_vis["pred"]["barrier_locs"] = barrier_locs  # torch.tensor
-        values_for_vis["pred"]["centroid"] = centroid_true  # torch.tensor
-        values_for_vis["true"]["kinematic_positions"] = kinematic_positions  # torch.tensor
-        values_for_vis["true"]["runout_end"] = runout_end_true  # torch.tensor
-        values_for_vis["true"]["barrier_locs"] = torch.tensor(barrier_locs_true)  # torch.tensor
-        values_for_vis["pred"]["centroid"] = centroid_pred  # torch.tensor
+        if loss_mesure == "farthest_positions":
+            values_for_vis["pred"]["kinematic_positions"] = kinematic_positions_pred  # torch.tensor
+            values_for_vis["pred"]["runout_end"] = runout_end_pred  # torch.tensor
+            values_for_vis["pred"]["barrier_locs"] = barrier_locs  # torch.tensor
+            values_for_vis["true"]["kinematic_positions"] = kinematic_positions  # torch.tensor
+            values_for_vis["true"]["runout_end"] = runout_end_true  # torch.tensor
+            values_for_vis["true"]["barrier_locs"] = torch.tensor(barrier_locs_true)  # torch.tensor
+        elif loss_mesure == "centroid":
+            # Save necessary variables to visualize current optimization state
+            values_for_vis["pred"]["kinematic_positions"] = kinematic_positions_pred  # torch.tensor
+            values_for_vis["pred"]["barrier_locs"] = barrier_locs  # torch.tensor
+            values_for_vis["pred"]["centroid"] = centroid_pred  # torch.tensor
+            values_for_vis["true"]["kinematic_positions"] = kinematic_positions  # torch.tensor
+            values_for_vis["true"]["barrier_locs"] = torch.tensor(barrier_locs_true)  # torch.tensor
+            values_for_vis["true"]["centroid"] = centroid_true  # torch.tensor
+        else:
+            raise ValueError("Check loss measure. Should be `farthest_positions` or `centroid`")
 
         # Save status plot for every iteration and closure call
         visualize_state(
@@ -108,6 +120,7 @@ def lbfgs(
         # Update barrier locations
         print("Backpropagate...")
         loss.backward()
+        print(barrier_zlocs.grad)
         # Print updated barrier locations
         print(f"Updated barrier locations: {barrier_locs.detach().cpu().numpy()}")
 
@@ -124,7 +137,7 @@ def lbfgs(
             'loss': loss.item(),
             'time_spent': time_for_iteration,
             'save_values': values_for_save,
-            'updated_barrier_loc_state_dict': To_Torch_Model_Param(barrier_locs).state_dict(),
+            'updated_barrier_loc_state_dict': To_Torch_Model_Param(barrier_zlocs).state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
         }, f"{output_dir}/optimizer_state-e{closure_count}.pt")
 
@@ -143,17 +156,18 @@ def lbfgs(
     while closure_count < niterations:
         optimizer.step(closure)
 
-        # Enforce the boundary constraints
-        boundary_constraints = barrier_info["search_area"]
-        with torch.no_grad():  # Make sure gradients are not computed for this operation
-            barrier_locs[:, 0].clamp_(
-                min=boundary_constraints[0][0], max=boundary_constraints[0][1])
-            barrier_locs[:, 1].clamp_(
-                min=boundary_constraints[1][0], max=boundary_constraints[1][1])
+        # # Enforce the boundary constraints
+        # boundary_constraints = barrier_info["search_area"]
+        # with torch.no_grad():  # Make sure gradients are not computed for this operation
+        #     barrier_locs[:, 0].clamp_(
+        #         min=boundary_constraints[0][0], max=boundary_constraints[0][1])
+        #     barrier_locs[:, 1].clamp_(
+        #         min=boundary_constraints[1][0], max=boundary_constraints[1][1])
 
-    return barrier_locs, values_for_save
+    return values_for_save
 
 
+# TODO (yc): change corresponding to z-location optimization
 def adam(
         loss_mesure,
         simulator,
@@ -222,11 +236,11 @@ def adam(
     values_for_vis["pred"]["kinematic_positions"] = kinematic_positions_pred  # torch.tensor
     values_for_vis["pred"]["runout_end"] = runout_end_pred  # torch.tensor
     values_for_vis["pred"]["barrier_locs"] = barrier_locs  # torch.tensor
-    values_for_vis["pred"]["centroid"] = centroid_true  # torch.tensor
+    values_for_vis["pred"]["centroid"] = centroid_pred  # torch.tensor
     values_for_vis["true"]["kinematic_positions"] = kinematic_positions  # torch.tensor
     values_for_vis["true"]["runout_end"] = runout_end_true  # torch.tensor
     values_for_vis["true"]["barrier_locs"] = torch.tensor(barrier_locs_true)  # torch.tensor
-    values_for_vis["pred"]["centroid"] = centroid_pred  # torch.tensor
+    values_for_vis["true"]["centroid"] = centroid_true  # torch.tensor
 
     # Save status plot for every iteration and closure call
     visualize_state(

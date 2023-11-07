@@ -157,9 +157,10 @@ def visualize_state(
                        edgecolors=vis_params[key]["perimeter_color"])
         if "centroid" in value:
             ax.scatter(centroid[0], centroid[2],
-                       s=10.0,
+                       s=20.0,
                        c=vis_params[key]["particle_color"],
-                       edgecolors=vis_params[key]["perimeter_color"])
+                       edgecolors=vis_params[key]["perimeter_color"],
+                       zorder=11)
 
         ### Plot runout fill. Simple `PolygonPath` doesn't work in the current version of the package
         # ax.add_patch(PolygonPatch(runout_perimeter, alpha=0.2))
