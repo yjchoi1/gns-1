@@ -1,0 +1,40 @@
+{
+  "path": "data/",
+  "optimizer": {
+    "type": "adam",
+    "loss_measure": "centroid",
+    "niterations": 35,
+    "lr": 0.01
+  },
+  "initial_guess": {
+    "barrier_locations": [[0.8, 0.13], [0.8, 0.75]]
+  },
+  "barrier_info": {
+    "barrier_height": 0.2,
+    "barrier_width": 0.1,
+    "base_height": 0.1,
+    "search_area": [[0.75, 0.85], [0.10, 0.90]]
+  },
+  "n_farthest_particles": 150,
+  "ground_truth": {
+    "npz_file": "trajectory0.npz",
+    "mpm_inputfile": "mpm_input.json"
+  },
+  "simulator": {
+    "nsteps": 354,
+    "checkpoint_interval": 1,
+    "dt_mpm": 0.0025,
+    "model_path": "data/",
+    "model_file": "model-5600000.pt",
+    "metadata_path": "data/",
+    "metadata_file": "gns_metadata.json"
+  },
+  "resume": {
+    "enabled": false,
+    "epoch": 0
+  },
+  "save_options": {
+    "output_dir": "data/outputs-adam-far_centroid/",
+    "save_step": 1
+  }
+}

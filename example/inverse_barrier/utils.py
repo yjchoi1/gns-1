@@ -157,7 +157,7 @@ def visualize_state(
                        edgecolors=vis_params[key]["perimeter_color"])
         if "centroid" in value:
             ax.scatter(centroid[0], centroid[2],
-                       s=20.0,
+                       s=50.0,
                        c=vis_params[key]["particle_color"],
                        edgecolors=vis_params[key]["perimeter_color"],
                        zorder=11)
