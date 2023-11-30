@@ -54,7 +54,7 @@ save_step = inputs["output"]['save_step']
 
 # resume
 resume = inputs["resume"]['resume']
-resume_epoch = inputs["resume"]['iteration']
+resume_epoch = inputs["resume"]['epoch']
 
 
 # Load simulator
@@ -115,7 +115,7 @@ if not os.path.exists(f"{output_dir}"):
 if resume:
     print(f"Resume from the previous state: iteration{resume_epoch}")
     checkpoint = torch.load(f"{output_dir}/optimizer_state-{resume_epoch}.pt")
-    start_epoch = checkpoint["iteration"]
+    start_epoch = checkpoint["epoch"]
     initial_velocity_x_model.load_state_dict(checkpoint['velocity_x_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 else:
@@ -208,7 +208,7 @@ for epoch in range(start_epoch+1, nepoch):
 
         # Save optimizer state
         torch.save({
-            'iteration': epoch,
+            'epoch': epoch,
             'time_spent': time_for_iteration,
             'position_state_dict': {
                 "target_positions": mpm_trajectory[0][0],
