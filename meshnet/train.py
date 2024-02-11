@@ -166,14 +166,24 @@ def rollout(simulator: learned_simulator.MeshSimulator,
 
     loss = (predictions - ground_truth_velocities.to(device)) ** 2
 
-    output_dict = {
-        'initial_velocities': initial_velocities.cpu().numpy(),
-        'predicted_rollout': predictions.cpu().numpy(),
-        'ground_truth_rollout': ground_truth_velocities.cpu().numpy(),
-        'node_coords': node_coords.cpu().numpy(),
-        'node_types': node_types.cpu().numpy(),
-        'mean_loss': loss.mean().cpu().numpy()
-    }
+    if FLAGS.is_fixed_mesh:
+        output_dict = {
+            'initial_velocities': initial_velocities.cpu().numpy(),
+            'predicted_rollout': predictions.cpu().numpy(),
+            'ground_truth_rollout': ground_truth_velocities.cpu().numpy(),
+            'node_coords': node_coords.cpu().numpy()[None, 0],
+            'node_types': node_types.cpu().numpy()[None, 0],
+            'mean_loss': loss.mean().cpu().numpy()
+        }
+    else:
+        output_dict = {
+            'initial_velocities': initial_velocities.cpu().numpy(),
+            'predicted_rollout': predictions.cpu().numpy(),
+            'ground_truth_rollout': ground_truth_velocities.cpu().numpy(),
+            'node_coords': node_coords.cpu().numpy(),
+            'node_types': node_types.cpu().numpy(),
+            'mean_loss': loss.mean().cpu().numpy()
+        }
 
     return output_dict
 
