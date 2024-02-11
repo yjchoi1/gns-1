@@ -172,7 +172,7 @@ class VisMeshNet:
         }
 
         # Get the max and min velocity magnitude values
-        vmin, vmax = self.vmin_both, self.vmax_both
+        vmin, vmax = self.vmin_true, self.vmax_true
 
         fig = plt.figure(figsize=(9, 4))
         grid = ImageGrid(
