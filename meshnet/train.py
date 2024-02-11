@@ -31,13 +31,21 @@ flags.DEFINE_integer('batch_size', 2, help='The batch size.')
 flags.DEFINE_string('data_path', "datasets/", help='The dataset directory.')
 flags.DEFINE_string('model_path', "model/", help=('The path for saving checkpoints of the model.'))
 flags.DEFINE_string('output_path', "rollouts/", help='The path for saving outputs (e.g. rollouts).')
-flags.DEFINE_string('metadata', "metadata_15gnn.json", help='Metadata filename (.json)')
+flags.DEFINE_string('metadata', "metadata.json", help='Metadata filename (.json)')
 flags.DEFINE_string('model_file', None, help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 flags.DEFINE_string('train_state_file', None, help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
-flags.DEFINE_integer("cuda_device_number", None, help="CUDA device (zero indexed), default is None so default CUDA device will be used.")
 flags.DEFINE_string('rollout_filename', "rollout", help='Name saving the rollout')
+
 flags.DEFINE_integer('ntraining_steps', int(1E7), help='Number of training steps.')
 flags.DEFINE_integer('nsave_steps', int(1000), help='Number of steps at which to save the model.')
+
+# Learning rate parameters
+flags.DEFINE_float('lr_init', 1e-4, help='Initial learning rate.')
+flags.DEFINE_float('lr_decay_rate', 0.1, help='Learning rate decay.')
+flags.DEFINE_integer('lr_decay_steps', int(5e6), help='Learning rate decay steps.')
+
+flags.DEFINE_integer("cuda_device_number", None, help="CUDA device (zero indexed), default is None so default CUDA device will be used.")
+
 FLAGS = flags.FLAGS
 
 
@@ -45,9 +53,6 @@ INPUT_SEQUENCE_LENGTH = 1
 noise_std = 2e-2
 node_type_embedding_size = 9
 dt = 0.01
-lr_init = 1e-4
-lr_decay_rate = 0.1
-lr_decay_steps = 5e6
 loss_report_step = 10
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -177,7 +182,7 @@ def train(simulator):
     print(f"device = {device}")
 
     # Initiate training.
-    optimizer = torch.optim.Adam(simulator.parameters(), lr=lr_init)
+    optimizer = torch.optim.Adam(simulator.parameters(), lr=FLAGS.lr_init)
     step = 0
 
     # Set model and its path to save, and load model.
@@ -265,7 +270,7 @@ def train(simulator):
                 optimizer.step()
 
                 # Update learning rate
-                lr_new = lr_init * lr_decay_rate ** (step / lr_decay_steps) + 1e-6
+                lr_new = FLAGS.lr_init * FLAGS.lr_decay_rate ** (step / FLAGS.lr_decay_steps) + 1e-6
                 for param in optimizer.param_groups:
                     param['lr'] = lr_new
 
