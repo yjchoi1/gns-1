@@ -29,7 +29,7 @@ flags.DEFINE_enum(
 flags.DEFINE_bool('is_fixed_mesh', True, help='Whether mesh-related data is fixed with time.')
 flags.DEFINE_integer('batch_size', 2, help='The batch size.')
 flags.DEFINE_string('data_path', "datasets/", help='The dataset directory.')
-flags.DEFINE_string('model_path', "model/", help=('The path for saving checkpoints of the model.'))
+flags.DEFINE_string('model_path', "models/", help=('The path for saving checkpoints of the model.'))
 flags.DEFINE_string('output_path', "rollouts/", help='The path for saving outputs (e.g. rollouts).')
 flags.DEFINE_string('metadata', "metadata.json", help='Metadata filename (.json)')
 flags.DEFINE_string('model_file', None, help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
@@ -181,6 +181,10 @@ def rollout(simulator: learned_simulator.MeshSimulator,
 def train(simulator, metadata=None):
 
     print(f"device = {device}")
+
+    # Get hyperparameters
+    if metadata is not None and "noise_std" in metadata:
+        noise_std = metadata["noise_std"]
 
     # Initiate training.
     optimizer = torch.optim.Adam(simulator.parameters(), lr=FLAGS.lr_init)
