@@ -24,16 +24,16 @@ from transform_4face import MyFaceToEdge
 
 
 flags.DEFINE_enum(
-    'mode', 'rollout', ['train', 'valid', 'rollout'],
+    'mode', 'train', ['train', 'valid', 'rollout'],
     help='Train model, validation or rollout evaluation.')
 flags.DEFINE_bool('is_fixed_mesh', True, help='Whether mesh-related data is fixed with time.')
 flags.DEFINE_integer('batch_size', 2, help='The batch size.')
-flags.DEFINE_string('data_path', "/work2/08264/baagee/frontera/gns-meshnet-data/gns-data/datasets/meshnet-trial4/", help='The dataset directory.')
-flags.DEFINE_string('model_path', "/work2/08264/baagee/frontera/gns-meshnet-data/gns-data/models/meshnet-trial4-10gnn/", help=('The path for saving checkpoints of the model.'))
-flags.DEFINE_string('output_path', "/work2/08264/baagee/frontera/gns-meshnet-data/gns-data/rollout/meshnet-trial4-10gnn/", help='The path for saving outputs (e.g. rollouts).')
-flags.DEFINE_string('metadata', "metadata-10gnn.json", help='Metadata filename (.json)')
-flags.DEFINE_string('model_file', "model-900000.pt", help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
-flags.DEFINE_string('train_state_file', "train_state-900000.pt", help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
+flags.DEFINE_string('data_path', "datasets/", help='The dataset directory.')
+flags.DEFINE_string('model_path', "models/", help=('The path for saving checkpoints of the model.'))
+flags.DEFINE_string('output_path', "rollouts/", help='The path for saving outputs (e.g. rollouts).')
+flags.DEFINE_string('metadata', "metadata.json", help='Metadata filename (.json)')
+flags.DEFINE_string('model_file', None, help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
+flags.DEFINE_string('train_state_file', None, help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 flags.DEFINE_string('rollout_filename', "rollout", help='Name saving the rollout')
 
 flags.DEFINE_integer('ntraining_steps', int(1E7), help='Number of training steps.')
@@ -166,24 +166,14 @@ def rollout(simulator: learned_simulator.MeshSimulator,
 
     loss = (predictions - ground_truth_velocities.to(device)) ** 2
 
-    if FLAGS.is_fixed_mesh:
-        output_dict = {
-            'initial_velocities': initial_velocities.cpu().numpy(),
-            'predicted_rollout': predictions.cpu().numpy(),
-            'ground_truth_rollout': ground_truth_velocities.cpu().numpy(),
-            'node_coords': node_coords.cpu().numpy()[None, 0],
-            'node_types': node_types.cpu().numpy()[None, 0],
-            'mean_loss': loss.mean().cpu().numpy()
-        }
-    else:
-        output_dict = {
-            'initial_velocities': initial_velocities.cpu().numpy(),
-            'predicted_rollout': predictions.cpu().numpy(),
-            'ground_truth_rollout': ground_truth_velocities.cpu().numpy(),
-            'node_coords': node_coords.cpu().numpy(),
-            'node_types': node_types.cpu().numpy(),
-            'mean_loss': loss.mean().cpu().numpy()
-        }
+    output_dict = {
+        'initial_velocities': initial_velocities.cpu().numpy(),
+        'predicted_rollout': predictions.cpu().numpy(),
+        'ground_truth_rollout': ground_truth_velocities.cpu().numpy(),
+        'node_coords': node_coords.cpu().numpy(),
+        'node_types': node_types.cpu().numpy(),
+        'mean_loss': loss.mean().cpu().numpy()
+    }
 
     return output_dict
 
