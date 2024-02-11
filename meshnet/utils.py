@@ -101,14 +101,20 @@ def read_metadata(data_path: str,
   Returns:
     metadata json object
   """
-  try:
-    with open(os.path.join(data_path, file_name), 'rt') as fp:
-      # New version use separate metadata for `train` and `rollout`.
-      metadata = json.loads(fp.read())[purpose]
+  path = os.path.join(data_path, file_name)
+  if os.path.exists(path):
+      print("Metadata exists. Read `metadata.json`")
+      try:
+        with open(path, 'rt') as fp:
+          # New version use separate metadata for `train` and `rollout`.
+          metadata = json.loads(fp.read())[purpose]
 
-  except:
-    with open(os.path.join(data_path, file_name), 'rt') as fp:
-      # The previous format of the metadata does not distinguish the purpose of metadata
-      metadata = json.loads(fp.read())
+      except:
+        with open(path, 'rt') as fp:
+          # The previous format of the metadata does not distinguish the purpose of metadata
+          metadata = json.loads(fp.read())
+  else:
+      print("Metadata does not exist. Use default values for simulator")
+      metadata = None
 
   return metadata
