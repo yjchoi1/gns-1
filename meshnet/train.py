@@ -60,7 +60,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 transformer = T.Compose([MyFaceToEdge(), T.Cartesian(norm=False), T.Distance(norm=False)])
 
 def predict(simulator: learned_simulator.MeshSimulator,
-            device: str):
+            device: str,
+            metadata=None):
 
     # Load simulator
     if os.path.exists(FLAGS.model_path + FLAGS.model_file):
@@ -177,7 +178,7 @@ def rollout(simulator: learned_simulator.MeshSimulator,
     return output_dict
 
 
-def train(simulator):
+def train(simulator, metadata=None):
 
     print(f"device = {device}")
 
@@ -305,10 +306,7 @@ def main(_):
 
     if FLAGS.mode == 'train':
         # read metadata
-        metadata = read_metadata(
-            data_path=FLAGS.data_path,
-            purpose="train",
-            file_name=FLAGS.metadata)
+        metadata = read_metadata(data_path=FLAGS.data_path, purpose="train", file_name=FLAGS.metadata)
 
         # load simulator
         simulator = learned_simulator.MeshSimulator(
@@ -316,7 +314,7 @@ def main(_):
             nnode_in=11,
             nedge_in=3,
             latent_dim=128,
-            nmessage_passing_steps=metadata['nmessage_passing_steps'],
+            nmessage_passing_steps=metadata['nmessage_passing_steps'] if metadata is not None else 10,
             nmlp_layers=2,
             mlp_hidden_dim=128,
             nnode_types=3,
@@ -328,14 +326,11 @@ def main(_):
         if FLAGS.train_state_file == "None":
            FLAGS.train_state_file = None
 
-        train(simulator)
+        train(simulator, metadata)
 
     elif FLAGS.mode in ['valid', 'rollout']:
-        # read metadata
-        metadata = read_metadata(
-            data_path=FLAGS.data_path,
-            purpose="train",
-            file_name=FLAGS.metadata)
+        # Read metadata
+        metadata = read_metadata(data_path=FLAGS.data_path, purpose="rollout", file_name=FLAGS.metadata)
 
         # load simulator
         simulator = learned_simulator.MeshSimulator(
@@ -343,14 +338,14 @@ def main(_):
             nnode_in=11,
             nedge_in=3,
             latent_dim=128,
-            nmessage_passing_steps=metadata['nmessage_passing_steps'],
+            nmessage_passing_steps=metadata['nmessage_passing_steps'] if metadata is not None else 10,
             nmlp_layers=2,
             mlp_hidden_dim=128,
             nnode_types=3,
             node_type_embedding_size=9,
             device=device)
 
-        predict(simulator, device)
+        predict(simulator, device, metadata)
 
 if __name__ == "__main__":
     app.run(main)
