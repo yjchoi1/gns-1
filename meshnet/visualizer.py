@@ -147,7 +147,8 @@ class VisMeshNet:
 
             # make the velocity field plot
             extent = [x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()]
-            velocity_field = ax.imshow(vel_grid, cmap=self.cmap, extent=extent, vmin=vmin, vmax=vmax)
+            velocity_field = ax.imshow(
+                vel_grid, cmap=self.cmap, extent=extent, vmin=vmin, vmax=vmax, origin='lower')
             cbar = fig.colorbar(velocity_field, cax=cax, orientation='vertical')
             # velocity_contour = ax.contourf(x_grid, y_grid, vel_grid, 50, cmap=self.cmap, levels=levels)
             # cbar = fig.colorbar(velocity_contour, cax=cax, orientation='vertical')
@@ -206,7 +207,8 @@ class VisMeshNet:
 
                 # make the velocity field plot
                 extent = [x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()]
-                velocity_field = grid[i].imshow(vel_grid, cmap=self.cmap, extent=extent, vmin=vmin, vmax=vmax)
+                velocity_field = grid[i].imshow(
+                    vel_grid, cmap=self.cmap, extent=extent, vmin=vmin, vmax=vmax, origin='lower')
                 cbar = fig.colorbar(velocity_field, cax=grid.cbar_axes[0], orientation='vertical')
 
                 # Format the color bar labels in scientific notation
