@@ -227,6 +227,52 @@ class VisMeshNet:
         # plt.tight_layout()
         return fig
 
+    def plot_error(self, timestep):
+        # Evaluate absolute error
+        error = np.abs(self.vel_mag_pred - self.vel_mag_true)
+
+        # Get the max and min velocity magnitude values
+        error_min, error_max = error.min(), error.max()
+
+        fig, ax = plt.subplots(1, 1, figsize=(5, 4))
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes('right', size='5%', pad=0.1)
+
+        if self.mesh_type == "triangle":
+            raise NotImplementedError
+
+        elif self.mesh_type == "quad":
+            # Reshape data
+            error_grid = error[timestep].reshape(self.ly, self.lx)
+            x_grid = self.node_coords[0][:, 0].reshape(self.ly, self.lx)
+            y_grid = self.node_coords[0][:, 1].reshape(self.ly, self.lx)
+
+            # Set obstacle location to NaN
+            grid_mask_wall = self.mask_wall[0].reshape(self.ly, self.lx)
+            error_grid[grid_mask_wall] = np.nan
+
+            # make the velocity field plot
+            extent = [x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()]
+            velocity_field = ax.imshow(
+                error_grid, cmap=self.cmap, extent=extent, vmin=error_min, vmax=error_max, origin='lower')
+            cbar = fig.colorbar(velocity_field, cax=cax, orientation='vertical')
+            # velocity_contour = ax.contourf(x_grid, y_grid, vel_grid, 50, cmap=self.cmap, levels=levels)
+            # cbar = fig.colorbar(velocity_contour, cax=cax, orientation='vertical')
+
+            # Format the color bar labels in scientific notation
+            cbar.formatter = FuncFormatter(lambda x, _: f'{x:.1e}')
+            cbar.update_ticks()
+            cbar.set_label("Error (lu/ts)", rotation=270, labelpad=10)
+            ax.set_aspect('equal')
+            ax.set_title(f"{timestep}/{self.ntimesteps}")
+            ax.set_xlabel("x (lu)")
+            ax.set_ylabel("y (lu)")
+        else:
+            raise ValueError
+
+        plt.tight_layout()
+        return fig
+
     def animate(self, vis_target, step_stride=5, fps=10):
         """
         Args:
