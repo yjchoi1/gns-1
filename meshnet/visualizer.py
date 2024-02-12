@@ -85,10 +85,12 @@ class VisMeshNet:
             self.vel_mag_pred = np.linalg.norm(vel_pred, axis=-1)
 
         # Create masks for each node type
-        self.mask_normal = np.squeeze(node_type == NodeType.NORMAL)
-        self.mask_outflow = np.squeeze(node_type == NodeType.OUTFLOW)
-        self.mask_inflow = np.squeeze(node_type == NodeType.INFLOW)
-        self.mask_wall = np.squeeze(node_type == NodeType.WALL_BOUNDARY)
+        n_mesh_coords = node_coords.shape[0]  # same with ntimesteps if not fixed_mesh else it will be 1 for fixed mesh
+        n_nodes = node_coords.shape[1]
+        self.mask_normal = np.reshape(node_type == NodeType.NORMAL, (n_mesh_coords, n_nodes))
+        self.mask_outflow = np.reshape(node_type == NodeType.OUTFLOW, (n_mesh_coords, n_nodes))
+        self.mask_inflow = np.reshape(node_type == NodeType.INFLOW, (n_mesh_coords, n_nodes))
+        self.mask_wall = np.reshape(node_type == NodeType.WALL_BOUNDARY, (n_mesh_coords, n_nodes))
 
         # Necessary variables
         self.ntimesteps = len(vel_true)
