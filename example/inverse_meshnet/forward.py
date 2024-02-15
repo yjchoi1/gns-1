@@ -29,7 +29,7 @@ def rollout_with_checkpointing(
 
     # initial_velocities = velocities[:INPUT_SEQUENCE_LENGTH].squeeze().to(device)
     current_velocities = initial_velocities.squeeze()
-    velocities_for_mask = initial_velocities.clone().squeeze()
+    velocities_for_mask = initial_velocities.detach().clone().squeeze()
 
     predictions = []
 
@@ -52,19 +52,24 @@ def rollout_with_checkpointing(
         # Represent graph using edge_index and make edge_feature to be using [relative_distance, norm]
         graph = transformer(graph).to(device)
 
-        if step % checkpoint_interval == 0:
-            predicted_next_velocity = torch.utils.checkpoint.checkpoint(
-                simulator.predict_velocity,
-                graph.x[:, 1:3],
-                graph.x[:, 0],
-                graph.edge_index,
-                graph.edge_attr)
-        else:
-            predicted_next_velocity = simulator.predict_velocity(
-                graph.x[:, 1:3],
-                graph.x[:, 0],
-                graph.edge_index,
-                graph.edge_attr)
+        # if step % checkpoint_interval == 0:
+        #     predicted_next_velocity = torch.utils.checkpoint.checkpoint(
+        #         simulator.predict_velocity,
+        #         graph.x[:, 1:3],
+        #         graph.x[:, 0],
+        #         graph.edge_index,
+        #         graph.edge_attr)
+        # else:
+        #     predicted_next_velocity = simulator.predict_velocity(
+        #         graph.x[:, 1:3],
+        #         graph.x[:, 0],
+        #         graph.edge_index,
+        #         graph.edge_attr)
+        predicted_next_velocity = simulator.predict_velocity(
+            graph.x[:, 1:3],
+            graph.x[:, 0],
+            graph.edge_index,
+            graph.edge_attr)
 
         # Get masks
         inflow_mask = (current_node_type == NodeType.INFLOW).clone().detach().squeeze()

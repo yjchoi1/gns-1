@@ -43,16 +43,16 @@ is_fixed_mesh = True
 # Inputs for optimizer
 optimizer_type = "adam"  # or lbfgs
 niteration = 10
-inverse_timestep_range = [50, 70]
-inverse_node_range = [[180, 200], [0, 150]]
+inverse_timestep_range = [2, 3]
+inverse_node_range = [[10, 20], [0, 150]]
 checkpoint_interval = 1
-lr = 10
+lr = 0.1
 initial_vleft_x = tools.vel_autogen(
-    ly=ly, shape_option="uniform", args={"peak": [0.26, 0.26], "npoints": ly})
+    ly=ly, shape_option="uniform", args={"peak": [0.15, 0.15], "npoints": ly})
 
 # inputs for forward simulator
 simulator_metadata = utils.read_metadata(data_path, "rollout", "metadata-10gnn.json")
-model_file = "model-1700000.pt"
+model_file = "model-1400000.pt"
 n_message_passing = simulator_metadata['nmessage_passing_steps'] if simulator_metadata is not None else 10
 node_type_embedding_size = 9
 dt = 0.01  # unnecessary since it is not used in model
@@ -79,6 +79,7 @@ simulator = learned_simulator.MeshSimulator(
     nnode_types=3,
     node_type_embedding_size=9,
     device=device)
+simulator.load(f"{data_path}/{model_file}")
 simulator.to(device)
 simulator.eval()
 
@@ -100,11 +101,9 @@ ntimesteps = len(velocities)
 # Note that node_coords follows column-based order. Therefore, we need to the following conversion
 # TODO: confirm if the conversion is correct.
 vel_grid = np.reshape(velocities, (ntimesteps, ly, lx, 2)).transpose((0, 2, 1, 3))
-initial_vel_grid_torch = torch.tensor(vel_grid[0]).to(device)
-# target_vel_grid = vel_grid[inverse_timestep_range[0]:inverse_timestep_range[1],  # timesteps
-#              inverse_node_range[0][0]:inverse_node_range[0][1],  # x-range
-#              inverse_node_range[1][0]:inverse_node_range[1][1], :]  # y-range
-# inverse_node_range = [[0, 200], [0, 200]]
+# Empty the initial vel-x that will be updated during optimization
+vel_grid[0, 0, :, 0] = 0
+v0 = torch.tensor(vel_grid[0]).to(device)
 target_vel_grid = vel_grid[inverse_timestep_range[0]:inverse_timestep_range[1],  # timesteps
              inverse_node_range[0][0]:inverse_node_range[0][1],  # x-range
              inverse_node_range[1][0]:inverse_node_range[1][1], :]  # y-range
@@ -163,6 +162,7 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
         cells = features[3].to(device)
 
         # Make current initial velocity
+        initial_vel_grid_torch = v0.clone()
         initial_vel_grid_torch[0, :, 0] = initial_vleft_x  # replace left most node's vel-x to `initial_vleft_x`.
         # Map it back to the original velocity tensor following its ordering convention
         initial_vel_flatten = initial_vel_grid_torch.permute(1, 0, 2).reshape(-1, 2)  # reshape to [lx*lx, dims]
@@ -170,17 +170,16 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
 
         # Forward
         # Note: if we use nsteps=10, the resultant `prediction_velocities` will have the length of 1+10
-        with torch.no_grad():
-            pred_vels = rollout_with_checkpointing(
-                simulator=simulator,
-                node_coords=node_coords,
-                node_types=node_type,
-                # initial_velocities=initial_vel_flatten,
-                initial_velocities=velocities[0],
-                cells=cells,
-                nsteps=inverse_timestep_range[1] - INPUT_SEQUENCE_LENGTH,
-                checkpoint_interval=1000,
-                device=device)
+        pred_vels = rollout_with_checkpointing(
+            simulator=simulator,
+            node_coords=node_coords,
+            node_types=node_type,
+            initial_velocities=initial_vel_flatten,
+            # initial_velocities=velocities[0],
+            cells=cells,
+            nsteps=inverse_timestep_range[1] - INPUT_SEQUENCE_LENGTH,
+            checkpoint_interval=1,
+            device=device)
 
         # Convert the velocity to velocity grid
         pred_vels_grid = torch.reshape(pred_vels, (len(pred_vels), ly, lx, 2)).permute(0, 2, 1, 3)
@@ -212,7 +211,7 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
                           inverse_node_range[1][0]:inverse_node_range[1][1]]  # y-range
 
         # Loss
-        loss = torch.mean((data_vel_grid - target_vel_grid) ** 2)
+        loss = torch.mean((data_vel_grid - target_vel_grid_torch) ** 2)
         print(f"MSE loss: {loss}")
 
         # Backpropagation
