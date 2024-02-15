@@ -42,11 +42,11 @@ is_fixed_mesh = True
 
 # Inputs for optimizer
 optimizer_type = "adam"  # or lbfgs
-niteration = 10
-inverse_timestep_range = [2, 3]
+niteration = 50
+inverse_timestep_range = [8, 10]
 inverse_node_range = [[10, 20], [0, 150]]
 checkpoint_interval = 1
-lr = 0.1
+lr = 0.01
 initial_vleft_x = tools.vel_autogen(
     ly=ly, shape_option="uniform", args={"peak": [0.15, 0.15], "npoints": ly})
 
@@ -149,6 +149,7 @@ initial_vleft_x = initial_vleft_x_model.current_params.to(device)
 # Start optimization iteration
 if optimizer_type == "adam" or optimizer_type == "sgd":
     for iteration in range(start_iteration, niteration):
+        print(f"Iteration: {iteration} ---------------------------------------")
         t_start_opt = time.time()
         optimizer.zero_grad()  # Clear previous gradients
 
@@ -170,12 +171,12 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
 
         # Forward
         # Note: if we use nsteps=10, the resultant `prediction_velocities` will have the length of 1+10
+        print("Forward...")
         pred_vels = rollout_with_checkpointing(
             simulator=simulator,
             node_coords=node_coords,
             node_types=node_type,
             initial_velocities=initial_vel_flatten,
-            # initial_velocities=velocities[0],
             cells=cells,
             nsteps=inverse_timestep_range[1] - INPUT_SEQUENCE_LENGTH,
             checkpoint_interval=1,
@@ -190,7 +191,7 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
             node_coords=node_coords.clone().detach().cpu().numpy(),
             node_type=node_type.clone().detach().cpu().numpy(),
             vel_true=velocities[:inverse_timestep_range[1]].clone().detach().cpu().numpy(),
-            vel_pred=pred_vels.clone().detach().cpu().numpy(),
+            vel_pred=pred_vels[:inverse_timestep_range[1]].clone().detach().cpu().numpy(),
             quad_grid_config=[lx, ly])
 
         # Plot model: current velocity inference (before update)
@@ -198,8 +199,8 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
         fig_model.savefig(f"{output_path}/model-{iteration}.png")
 
         # Plot data: current velocity field (before update)
-        fig_data = vis.plot_field_compare(timestep=inverse_timestep_range[1]-1)
-        fig_data.savefig(f"{output_path}/data_t{inverse_timestep_range[1]-1}-{iteration}.png")
+        fig_data = vis.plot_field_compare(timestep=inverse_timestep_range[1]-INPUT_SEQUENCE_LENGTH)
+        fig_data.savefig(f"{output_path}/data_t{inverse_timestep_range[1]-INPUT_SEQUENCE_LENGTH}-{iteration}.png")
 
         t = 2
         fig_data = vis.plot_field_compare(timestep=t)
@@ -222,6 +223,7 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
         t_backprop = t_end_backprop - t_start_backprop
 
         # Update model
+        print("Update parameters...")
         optimizer.step()
 
         # Record time for an optimization iteration
@@ -229,12 +231,13 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
         t_opt_iter = t_end_opt - t_start_opt
 
         # Save optimization status
+        print("Save optimization status")
         if iteration % save_step == 0:
             torch.save({
                 'iteration': iteration,
                 't_opt_iter': t_opt_iter,
                 't_backprop': t_backprop,
-                'updated_velocities': initial_vel_flatten,
+                'updated_velocities': initial_vel_flatten.clone().detach().cpu().numpy(),
                 'velocity_x_state_dict': tools.To_Torch_Model_Param(initial_vleft_x).state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss.item(),
