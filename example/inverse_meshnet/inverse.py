@@ -83,34 +83,30 @@ simulator.load(f"{data_path}/{model_file}")
 simulator.to(device)
 simulator.eval()
 
+# Get ground truth velocity at the inversion timesteps and node coordinates
 ds = data_loader.get_data_loader_by_trajectories(
     path=f"{data_path}/{ground_truth_npz}", fixed_mesh=is_fixed_mesh)
 features = next(iter(ds))
-node_coords = features[0].numpy()
-velocities = features[2].numpy()
-
-# # plot to check node order
-# ntimesteps = len(features[2])
-# node_grid = np.reshape(node_coords, (ntimesteps, ly, lx, 2)).transpose((0, 2, 1, 3))
-# fig, ax = plt.subplots(figsize=(30, 20))
-# ax.scatter(node_grid[0][:, :, 0], node_grid[0][:, :, 1], s=0.1)
-# plt.show()
+node_coords = features[0].to(device)  # (timesteps, nnode, ndims)
+node_type = features[1].to(device)  # (timesteps, nnode, )
+velocities = features[2].to(device)  # (timesteps, nnode, ndims)
+cells = features[3].to(device)
 
 # transform velocity to velocity grid, and get the target velocity
 ntimesteps = len(velocities)
 # Note that node_coords follows column-based order. Therefore, we need to the following conversion
-# TODO: confirm if the conversion is correct.
-vel_grid = np.reshape(velocities, (ntimesteps, ly, lx, 2)).transpose((0, 2, 1, 3))
+vel_fields_grid_true = velocities.clone().reshape(ntimesteps, ly, lx, 2).permute((0, 2, 1, 3))
 # Empty the initial vel-x that will be updated during optimization
-vel_grid[0, 0, :, 0] = 0
-v0 = torch.tensor(vel_grid[0]).to(device)
-target_vel_grid = vel_grid[inverse_timestep_range[0]:inverse_timestep_range[1],  # timesteps
+vel_fields_grid_true[0, 0, :, 0] = 0
+# Get the target data at the inverse timestep and spacial domain range
+vel_fields_grid_target = vel_fields_grid_true[inverse_timestep_range[0]:inverse_timestep_range[1],  # timesteps
              inverse_node_range[0][0]:inverse_node_range[0][1],  # x-range
              inverse_node_range[1][0]:inverse_node_range[1][1], :]  # y-range
-target_vel_grid_torch = torch.tensor(target_vel_grid).to(device)
+target_vel_grid_torch = torch.tensor(vel_fields_grid_target)
 
 # Initialize initial x-velocity
 initial_vleft_x = torch.tensor(initial_vleft_x, requires_grad=True, device=device)
+# Resister as torch model parameter so that it can be passed to optimizer object
 initial_vleft_x_model = tools.To_Torch_Model_Param(initial_vleft_x)
 
 # Set up the optimizer
@@ -143,8 +139,8 @@ else:
     if optimizer_type == "lbfgs":
         closure_count = 0
 
+# Get the current velocity model
 initial_vleft_x = initial_vleft_x_model.current_params.to(device)
-# initial_vel_y = torch.full((ly, 1), 0).to(device)
 
 # Start optimization iteration
 if optimizer_type == "adam" or optimizer_type == "sgd":
@@ -153,37 +149,29 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
         t_start_opt = time.time()
         optimizer.zero_grad()  # Clear previous gradients
 
-        # Get ground truth velocity at the inversion timesteps and node coordinates
-        ds = data_loader.get_data_loader_by_trajectories(
-            path=f"{data_path}/{ground_truth_npz}", fixed_mesh=is_fixed_mesh)
-        features = next(iter(ds))
-        node_coords = features[0].to(device)  # (timesteps, nnode, ndims)
-        node_type = features[1].to(device)  # (timesteps, nnode, )
-        velocities = features[2].to(device)  # (timesteps, nnode, ndims)
-        cells = features[3].to(device)
-
         # Make current initial velocity
-        initial_vel_grid_torch = v0.clone()
-        initial_vel_grid_torch[0, 1:-1, 0] = initial_vleft_x[1:-1]  # replace left most node's vel-x to `initial_vleft_x`.
+        v0_field_grid = vel_fields_grid_true[0].clone()
+        # replace left most node's vel-x to `initial_vleft_x`.
+        v0_field_grid[0, 1:-1, 0] = initial_vleft_x[1:-1]
         # Map it back to the original velocity tensor following its ordering convention
-        initial_vel_flatten = initial_vel_grid_torch.permute(1, 0, 2).reshape(-1, 2)  # reshape to [lx*lx, dims]
-        # TODO: Check if the `initial_vel_flatten` can recovoer `initial_vel_grid`
+        v0_field_flatten = v0_field_grid.permute(1, 0, 2).reshape(-1, 2)  # reshape to [lx*lx, dims]
 
         # Forward
         # Note: if we use nsteps=10, the resultant `prediction_velocities` will have the length of 1+10
         print("Forward...")
-        pred_vels = rollout_with_checkpointing(
+        vel_fields_flatten_pred = rollout_with_checkpointing(
             simulator=simulator,
             node_coords=node_coords,
             node_types=node_type,
-            initial_velocities=initial_vel_flatten,
+            initial_velocities=v0_field_flatten,
             cells=cells,
             nsteps=inverse_timestep_range[1] - INPUT_SEQUENCE_LENGTH,
             checkpoint_interval=1,
             device=device)
 
         # Convert the velocity to velocity grid
-        pred_vels_grid = torch.reshape(pred_vels, (len(pred_vels), ly, lx, 2)).permute(0, 2, 1, 3)
+        vel_fields_grid_pred = torch.reshape(
+            vel_fields_flatten_pred, (len(vel_fields_flatten_pred), ly, lx, 2)).permute(0, 2, 1, 3)
 
         # Init visualizer
         vis = visualizer.VisMeshNet(
@@ -191,7 +179,7 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
             node_coords=node_coords.clone().detach().cpu().numpy(),
             node_type=node_type.clone().detach().cpu().numpy(),
             vel_true=velocities[:inverse_timestep_range[1]].clone().detach().cpu().numpy(),
-            vel_pred=pred_vels[:inverse_timestep_range[1]].clone().detach().cpu().numpy(),
+            vel_pred=vel_fields_flatten_pred[:inverse_timestep_range[1]].clone().detach().cpu().numpy(),
             quad_grid_config=[lx, ly])
 
         # Plot model: current velocity inference (before update)
@@ -202,14 +190,11 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
         fig_data = vis.plot_field_compare(timestep=inverse_timestep_range[1]-INPUT_SEQUENCE_LENGTH)
         fig_data.savefig(f"{output_path}/data_t{inverse_timestep_range[1]-INPUT_SEQUENCE_LENGTH}-{iteration}.png")
 
-        t = 2
-        fig_data = vis.plot_field_compare(timestep=t)
-        fig_data.savefig(f"{output_path}/data_t{t}-{iteration}.png")
-
         # Get data to compare with target
-        data_vel_grid = pred_vels_grid[inverse_timestep_range[0]:inverse_timestep_range[1],  # timesteps
-                          inverse_node_range[0][0]:inverse_node_range[0][1],  # x-range
-                          inverse_node_range[1][0]:inverse_node_range[1][1]]  # y-range
+        data_vel_grid = vel_fields_grid_pred[
+                        inverse_timestep_range[0]:inverse_timestep_range[1],  # timesteps
+                        inverse_node_range[0][0]:inverse_node_range[0][1],  # x-range
+                        inverse_node_range[1][0]:inverse_node_range[1][1]]  # y-range
 
         # Loss
         loss = torch.mean((data_vel_grid - target_vel_grid_torch) ** 2)
@@ -237,7 +222,7 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
                 'iteration': iteration,
                 't_opt_iter': t_opt_iter,
                 't_backprop': t_backprop,
-                'updated_velocities': initial_vel_flatten.clone().detach().cpu().numpy(),
+                'updated_velocities': v0_field_flatten.clone().detach().cpu().numpy(),
                 'velocity_x_state_dict': tools.To_Torch_Model_Param(initial_vleft_x).state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss.item(),

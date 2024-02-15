@@ -27,7 +27,6 @@ def rollout_with_checkpointing(
         is_fixed_mesh=True
 ):
 
-    # initial_velocities = velocities[:INPUT_SEQUENCE_LENGTH].squeeze().to(device)
     current_velocities = initial_velocities.squeeze()
     velocities_for_mask = initial_velocities.detach().clone().squeeze()
 
