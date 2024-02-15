@@ -164,7 +164,7 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
 
         # Make current initial velocity
         initial_vel_grid_torch = v0.clone()
-        initial_vel_grid_torch[0, :, 0] = initial_vleft_x  # replace left most node's vel-x to `initial_vleft_x`.
+        initial_vel_grid_torch[0, 1:-1, 0] = initial_vleft_x[1:-1]  # replace left most node's vel-x to `initial_vleft_x`.
         # Map it back to the original velocity tensor following its ordering convention
         initial_vel_flatten = initial_vel_grid_torch.permute(1, 0, 2).reshape(-1, 2)  # reshape to [lx*lx, dims]
         # TODO: Check if the `initial_vel_flatten` can recovoer `initial_vel_grid`
