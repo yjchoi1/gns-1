@@ -66,6 +66,12 @@ save_interval = 1
 resume = False
 resume_iteration = 0
 
+# Inputs for visualizing
+lx_physical = 1.0
+ly_physical = lx_physical * ly/lx
+x_conversion = lx_physical/lx
+y_conversion = ly_physical/ly
+
 
 # load simulator
 simulator = learned_simulator.MeshSimulator(
@@ -182,14 +188,6 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
             vel_pred=vel_fields_flatten_pred[:inverse_timestep_range[1]].clone().detach().cpu().numpy(),
             quad_grid_config=[lx, ly])
 
-        # Plot model: current velocity inference (before update)
-        fig_model = vis.plot_model(timestep=0)
-        fig_model.savefig(f"{output_path}/model-{iteration}.png")
-
-        # Plot data: current velocity field (before update)
-        fig_data = vis.plot_field_compare(timestep=inverse_timestep_range[1]-INPUT_SEQUENCE_LENGTH)
-        fig_data.savefig(f"{output_path}/data_t{inverse_timestep_range[1]-INPUT_SEQUENCE_LENGTH}-{iteration}.png")
-
         # Get data to compare with target
         data_vel_grid = vel_fields_grid_pred[
                         inverse_timestep_range[0]:inverse_timestep_range[1],  # timesteps
@@ -199,6 +197,22 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
         # Loss
         loss = torch.mean((data_vel_grid - target_vel_grid_torch) ** 2)
         print(f"MSE loss: {loss}")
+
+        # Plot model: current velocity inference (before update)
+        fig_model = vis.plot_model(
+            timestep=0, title=f"Iteration={iteration}, MSE={loss.item():.3e}")
+        fig_model.savefig(f"{output_path}/model-{iteration}.png")
+
+        # Plot data: current velocity field (before update)
+        highlight_x = inverse_node_range[0][0] * x_conversion
+        highlight_y = inverse_node_range[1][0] * y_conversion
+        highlight_len_x = (inverse_node_range[0][1] - inverse_node_range[0][0]) * x_conversion
+        highlight_len_y = (inverse_node_range[1][1] - inverse_node_range[1][0]) * y_conversion
+        fig_data = vis.plot_field_compare(
+            timestep=inverse_timestep_range[1]-INPUT_SEQUENCE_LENGTH,
+            highlight=(highlight_x, highlight_y, highlight_len_x, highlight_len_y),
+            title=f"Iteration={iteration}, MSE={loss.item():.3e}")
+        fig_data.savefig(f"{output_path}/data_t{inverse_timestep_range[1]-INPUT_SEQUENCE_LENGTH}-{iteration}.png")
 
         # Backpropagation
         print("Backpropagate...")
