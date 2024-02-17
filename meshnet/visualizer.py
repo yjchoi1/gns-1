@@ -5,6 +5,7 @@ import sys
 import os
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
+import matplotlib.patches as patches
 from matplotlib.colors import ListedColormap
 from mpl_toolkits.axes_grid1 import ImageGrid
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -12,12 +13,12 @@ from matplotlib.ticker import FuncFormatter
 import imageio
 from matplotlib import animation
 import io
-from utils import NodeType
+from meshnet.utils import NodeType
 
 
 MARKER_SIZE = 10
 COLORMAP_TYPE = "viridis"
-NAN_COLOR = "black"
+NAN_COLOR = "gray"
 
 
 def get_pkl(path):
@@ -112,7 +113,7 @@ class VisMeshNet:
     def preprocess(self):
         return None
 
-    def plot_field(self, vis_target, timestep):
+    def plot_field(self, vis_target, timestep, title=None, figsize=(5, 4)):
 
         # Select velocity magnitude data to plot
         if vis_target == "vel_mag_true":
@@ -128,7 +129,7 @@ class VisMeshNet:
         # levels = np.linspace(vmin, vmax, 100)
 
         # Init figure
-        fig, ax = plt.subplots(1, 1, figsize=(5, 4))
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
         divider = make_axes_locatable(ax)
         cax = divider.append_axes('right', size='5%', pad=0.1)
 
@@ -161,13 +162,26 @@ class VisMeshNet:
             ax.set_title(f"{timestep}/{self.ntimesteps}")
             ax.set_xlabel("x (lu)")
             ax.set_ylabel("y (lu)")
+
+            # Get current ticks
+            xticks = ax.get_xticks()
+            yticks = ax.get_yticks()
+            # Chnage the current ticks to the custom labels
+            xticklabels = [f"{round(tick * self.lx)}" for tick in xticks]
+            yticklabels = [f"{round(tick * self.ly)}" for tick in yticks]
+            ax.set_xticklabels(xticklabels)
+            ax.set_yticklabels(yticklabels)
         else:
             raise ValueError
+
+        if title is not None:
+            ax.set_title(title)
 
         plt.tight_layout()
         return fig
 
-    def plot_field_compare(self, timestep):
+    def plot_field_compare(
+            self, timestep, highlight=None, title=None, figsize=(9, 4)):
 
         vel_mag_set = {
             "Ground truth": self.vel_mag_true,
@@ -177,7 +191,7 @@ class VisMeshNet:
         # Get the max and min velocity magnitude values
         vmin, vmax = self.vmin_true, self.vmax_true
 
-        fig = plt.figure(figsize=(9, 4))
+        fig = plt.figure(figsize=figsize)
         grid = ImageGrid(
             fig, 111,
             nrows_ncols=(1, 2),
@@ -200,6 +214,15 @@ class VisMeshNet:
             grid_mask_wall = self.mask_wall[0].reshape(self.ly, self.lx)
 
             for i, (sim, vel_mag) in enumerate(vel_mag_set.items()):
+
+                if highlight is not None:
+                    # create a rectangle patch
+                    rect = patches.Rectangle(
+                        (highlight[0], highlight[1]), highlight[2], highlight[3],
+                        linewidth=1, linestyle='-', edgecolor='r', facecolor='none', alpha=0.7)
+                    # Add the patch to the Axes
+                    grid[i].add_patch(rect)
+
                 # Reshape vel data to grid data
                 vel_grid = vel_mag[timestep].reshape(self.ly, self.lx)
                 # Set obstacle location to NaN
@@ -215,26 +238,38 @@ class VisMeshNet:
                 cbar.formatter = FuncFormatter(lambda x, _: f'{x:.1e}')
                 cbar.update_ticks()
                 cbar.set_label("Velocity (lu/ts)", rotation=270, labelpad=10)
-                fig.suptitle(f"{timestep}/{self.ntimesteps}")
                 grid[i].set_aspect('equal')
                 grid[i].set_title(sim, pad=3)
                 grid[i].set_xlabel("x (lu)")
                 grid[i].set_ylabel("y (lu)")
 
+                # Get current ticks
+                xticks = grid[i].get_xticks()
+                yticks = grid[i].get_yticks()
+                # Chnage the current ticks to the custom labels
+                xticklabels = [f"{round(tick*self.lx)}" for tick in xticks]
+                yticklabels = [f"{round(tick*self.ly)}" for tick in yticks]
+                grid[i].set_xticklabels(xticklabels)
+                grid[i].set_yticklabels(yticklabels)
+
         else:
             raise ValueError
 
-        # plt.tight_layout()
+        # Set figure subtitle
+        if title is None:
+            title = f"{timestep}/{self.ntimesteps}"
+        fig.suptitle(title)
+
         return fig
 
-    def plot_error(self, timestep):
+    def plot_error(self, timestep, title=None, figsize=(5, 4)):
         # Evaluate absolute error
         error = np.abs(self.vel_mag_pred - self.vel_mag_true)
 
         # Get the max and min velocity magnitude values
         error_min, error_max = error.min(), error.max()
 
-        fig, ax = plt.subplots(1, 1, figsize=(5, 4))
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
         divider = make_axes_locatable(ax)
         cax = divider.append_axes('right', size='5%', pad=0.1)
 
@@ -263,15 +298,53 @@ class VisMeshNet:
             cbar.formatter = FuncFormatter(lambda x, _: f'{x:.1e}')
             cbar.update_ticks()
             cbar.set_label("Error (lu/ts)", rotation=270, labelpad=10)
-            ax.set_aspect('equal')
             ax.set_title(f"{timestep}/{self.ntimesteps}")
             ax.set_xlabel("x (lu)")
             ax.set_ylabel("y (lu)")
+
+            # Get current ticks
+            xticks = ax.get_xticks()
+            yticks = ax.get_yticks()
+            # Chnage the current ticks to the custom labels
+            xticklabels = [f"{round(tick * self.lx)}" for tick in xticks]
+            yticklabels = [f"{round(tick * self.ly)}" for tick in yticks]
+            ax.set_xticklabels(xticklabels)
+            ax.set_yticklabels(yticklabels)
+
+            ax.set_aspect('equal')
         else:
             raise ValueError
 
+        if title is not None:
+            ax.set_title(title)
+
         plt.tight_layout()
         return fig
+
+    def plot_model(self, timestep, title=None, figsize=(5, 4)):
+        """
+        Plot left boundary velocity (model) for inverse problem
+        """
+
+        fig, ax = plt.subplots(figsize=figsize)
+        true_vels_grid = np.reshape(self.vel_true[timestep], (self.ly, self.lx, 2)).transpose((1, 0, 2))
+        pred_vels_grid = np.reshape(self.vel_pred[timestep], (self.ly, self.lx, 2)).transpose((1, 0, 2))
+        ax.plot(true_vels_grid[0, :, 0], np.arange(self.ly), c="black", label="Target")
+        ax.plot(pred_vels_grid[0, :, 0], np.arange(self.ly), c="blue", label="Inference", ls='--')
+        ax.set_ylabel("lu (y)")
+        ax.set_xlabel("Vel-x (lu/ts)")
+        if title is not None:
+            ax.set_title(title)
+        ax.legend()
+        plt.tight_layout()
+
+        return fig
+
+    def plot_data(self):
+        """
+        Plot observed velocity (data) for inverse problem
+        """
+        pass
 
     def animate(self, vis_target, step_stride=5, fps=10):
         """
