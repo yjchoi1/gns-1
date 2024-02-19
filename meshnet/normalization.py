@@ -3,9 +3,10 @@ import torch.nn as nn
 
 
 class Normalizer(nn.Module):
-    def __init__(self, size, max_accumulations=10 ** 6, std_epsilon=1e-8, name='Normalizer', device='cuda'):
+    def __init__(self, size, device, max_accumulations=10 ** 6, std_epsilon=1e-8, name='Normalizer'):
         super(Normalizer, self).__init__()
         self.name = name
+        self._device = device
         self._max_accumulations = max_accumulations
         self._std_epsilon = torch.tensor(std_epsilon, dtype=torch.float32, requires_grad=False, device=device)
         self._acc_count = torch.tensor(0, dtype=torch.float32, requires_grad=False, device=device)
@@ -28,6 +29,9 @@ class Normalizer(nn.Module):
     def _accumulate(self, batched_data):
         """Function to perform the accumulation of the batch_data statistics."""
         count = batched_data.shape[0]
+        # TODO: need to check the flow of variables through devices.
+        # TODO: `self._acc_sum` stays in a device=0, while `data_sum` iterate through device
+        # TODO: this happens only when resume.
         data_sum = torch.sum(batched_data, axis=0, keepdims=True)
         squared_data_sum = torch.sum(batched_data ** 2, axis=0, keepdims=True)
 

@@ -15,11 +15,13 @@ from absl import app
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from meshnet import data_loader
 from meshnet import learned_simulator
+from meshnet import distribute
 from meshnet.noise import get_velocity_noise
 from meshnet.utils import datas_to_graph
 from meshnet.utils import NodeType
 from meshnet.utils import optimizer_to
 from meshnet.utils import read_metadata
+from meshnet.utils import flags_to_dict
 from transform_4face import MyFaceToEdge
 
 
@@ -28,12 +30,15 @@ flags.DEFINE_enum(
     help='Train model, validation or rollout evaluation.')
 flags.DEFINE_bool('is_fixed_mesh', True, help='Whether mesh-related data is fixed with time.')
 flags.DEFINE_integer('batch_size', 2, help='The batch size.')
-flags.DEFINE_string('data_path', "datasets/", help='The dataset directory.')
-flags.DEFINE_string('model_path', "models/", help=('The path for saving checkpoints of the model.'))
-flags.DEFINE_string('output_path', "rollouts/", help='The path for saving outputs (e.g. rollouts).')
+flags.DEFINE_string('data_path', "/work2/08264/baagee/frontera/gns-meshnet-data/gns-data/datasets/debug/", help='The dataset directory.')
+flags.DEFINE_string('model_path', "/work2/08264/baagee/frontera/gns-meshnet-data/gns-data/models/debug/", help=('The path for saving checkpoints of the model.'))
+flags.DEFINE_string('output_path', "/work2/08264/baagee/frontera/gns-meshnet-data/gns-data/rollouts/debug/", help='The path for saving outputs (e.g. rollouts).')
 flags.DEFINE_string('metadata', "metadata.json", help='Metadata filename (.json)')
-flags.DEFINE_string('model_file', None, help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
-flags.DEFINE_string('train_state_file', None, help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
+# flags.DEFINE_string('model_file', None, help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
+# flags.DEFINE_string('train_state_file', None, help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
+flags.DEFINE_string('model_file', 'model-0.pt', help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
+flags.DEFINE_string('train_state_file', 'train_state-0.pt', help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
+
 flags.DEFINE_string('rollout_filename', "rollout", help='Name saving the rollout')
 
 flags.DEFINE_integer('ntraining_steps', int(1E7), help='Number of training steps.')
@@ -55,7 +60,7 @@ node_type_embedding_size = 9
 dt = 0.01
 loss_report_step = 10
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # an instance that transforms face-based graph to edge-based graph. Edge features are auto-computed using "Cartesian" and "Distance"
 transformer = T.Compose([MyFaceToEdge(), T.Cartesian(norm=False), T.Distance(norm=False)])
 
@@ -188,28 +193,42 @@ def rollout(simulator: learned_simulator.MeshSimulator,
     return output_dict
 
 
-def train(simulator, metadata=None):
+def train(device, world_size, flags_dict, metadata=None):
 
-    print(f"device = {device}")
+    distribute.setup(device, world_size)
 
     # Get hyperparameters
     if metadata is not None and "noise_std" in metadata:
         noise_std = metadata["noise_std"]
 
+    # Get simulator
+    serial_simulator = learned_simulator.MeshSimulator(
+        simulation_dimensions=2,
+        nnode_in=11,
+        nedge_in=3,
+        latent_dim=128,
+        nmessage_passing_steps=metadata['nmessage_passing_steps'] if metadata is not None else 10,
+        nmlp_layers=2,
+        mlp_hidden_dim=128,
+        nnode_types=3,
+        node_type_embedding_size=9,
+        device=device)
+    simulator = DDP(serial_simulator.to(device), device_ids=[device], output_device=device)
+
     # Initiate training.
-    optimizer = torch.optim.Adam(simulator.parameters(), lr=FLAGS.lr_init)
+    optimizer = torch.optim.Adam(simulator.parameters(), lr=flags_dict["lr_init"]*world_size)
     step = 0
 
     # Set model and its path to save, and load model.
     # If model_path does not exist create new directory and begin training.
-    model_path = FLAGS.model_path
+    model_path = flags_dict["model_path"]
     if not os.path.exists(model_path):
         os.makedirs(model_path)
 
     # If model_path does exist and model_file and train_state_file exist continue training.
-    if FLAGS.model_file is not None:
+    if flags_dict["model_file"] is not None:
 
-        if FLAGS.model_file == "latest" and FLAGS.train_state_file == "latest":
+        if flags_dict["model_file"] == "latest" and flags_dict["train_state_file"] == "latest":
             # find the latest model, assumes model and train_state files are in step.
             fnames = glob.glob(f"{model_path}*model*pt")
             max_model_number = 0
@@ -219,38 +238,42 @@ def train(simulator, metadata=None):
                 if model_num > max_model_number:
                     max_model_number = model_num
             # reset names to point to the latest.
-            FLAGS.model_file = f"model-{max_model_number}.pt"
-            FLAGS.train_state_file = f"train_state-{max_model_number}.pt"
+            flags_dict["model_file"] = f"model-{max_model_number}.pt"
+            flags_dict["train_state_file"] = f"train_state-{max_model_number}.pt"
 
-        if os.path.exists(model_path + FLAGS.model_file) and os.path.exists(model_path + FLAGS.train_state_file):
+        if os.path.exists(model_path + flags_dict["model_file"]) and os.path.exists(model_path + flags_dict["train_state_file"]):
             # load model
-            simulator.load(model_path + FLAGS.model_file)
+            simulator.module.load(model_path + flags_dict["model_file"])
 
             # load train state
-            train_state = torch.load(model_path + FLAGS.train_state_file)
+            train_state = torch.load(model_path + flags_dict["train_state_file"])
             # set optimizer state
-            optimizer = torch.optim.Adam(simulator.parameters())
+            optimizer = torch.optim.Adam(simulator.module.parameters())
             optimizer.load_state_dict(train_state["optimizer_state"])
             optimizer_to(optimizer, device)
             # set global train state
             step = train_state["global_train_state"].pop("step")
         else:
             raise FileNotFoundError(
-                f"Specified model_file {model_path + FLAGS.model_file} and train_state_file {model_path + FLAGS.train_state_file} not found.")
+                f"Specified model_file {model_path + flags_dict['model_file']} and train_state_file {model_path + flags_dict['train_state_file']} not found.")
 
     simulator.train()
     simulator.to(device)
 
     # Load data
-    ds = data_loader.get_data_loader_by_samples(path=f'{FLAGS.data_path}/{FLAGS.mode}.npz',
-                                                input_length_sequence=INPUT_SEQUENCE_LENGTH,
-                                                dt=dt,
-                                                batch_size=FLAGS.batch_size,
-                                                fixed_mesh=FLAGS.is_fixed_mesh)
+    ds = distribute.get_data_distributed_dataloader_by_samples(
+        path=f"{flags_dict['data_path']}/{flags_dict['mode']}.npz",
+        input_length_sequence=INPUT_SEQUENCE_LENGTH,
+        dt=dt,
+        batch_size=flags_dict["batch_size"],
+        fixed_mesh=flags_dict["is_fixed_mesh"])
+
+    print(f"Device rank = {device}, cuda = {torch.cuda.is_available()}")
 
     not_reached_nsteps = True
     try:
         while not_reached_nsteps:
+            torch.distributed.barrier()
             for i, graph in enumerate(ds):
                 # Represent graph using edge_index and make edge_feature to be using [relative_distance, norm]
                 graph = transformer(graph.to(device))
@@ -266,7 +289,7 @@ def train(simulator, metadata=None):
                 velocity_noise = get_velocity_noise(graph, noise_std=noise_std, device=device)
 
                 # Predict dynamics
-                pred_acc, target_acc = simulator.predict_acceleration(
+                pred_acc, target_acc = simulator.module.predict_acceleration(
                     current_velocities=current_velocities,
                     node_type=node_types,
                     edge_index=edge_index,
@@ -275,7 +298,7 @@ def train(simulator, metadata=None):
                     velocity_noise=velocity_noise)
 
                 # Compute loss
-                mask = torch.logical_or(node_types == NodeType.NORMAL, node_types == NodeType.OUTFLOW)
+                mask = torch.logical_or(node_types == NodeType.NORMAL, node_types == NodeType.OUTFLOW).to(device)
                 errors = ((pred_acc - target_acc)**2)[mask]  # only compute errors if node_types is NORMAL or OUTFLOW
                 loss = torch.mean(errors)
 
@@ -285,23 +308,25 @@ def train(simulator, metadata=None):
                 optimizer.step()
 
                 # Update learning rate
-                lr_new = FLAGS.lr_init * FLAGS.lr_decay_rate ** (step / FLAGS.lr_decay_steps) + 1e-6
+                lr_new = world_size * (
+                        flags_dict["lr_init"] * flags_dict["lr_decay_rate"] ** (step / flags_dict["lr_decay_steps"])
+                ) + 1e-6
                 for param in optimizer.param_groups:
                     param['lr'] = lr_new
 
-                if step % loss_report_step == 0:
-                    print(f"Training step: {step}/{FLAGS.ntraining_steps}. Loss: {loss}.")
+                if step % loss_report_step == 0 and device == 0:
+                    print(f"Training step: {step}/{flags_dict['ntraining_steps']}. Loss: {loss}.")
 
                 # Save model state
-                if step % FLAGS.nsave_steps == 0:
-                    simulator.save(model_path + 'model-' + str(step) + '.pt')
+                if step % flags_dict["nsave_steps"] == 0 and device == 0:
+                    simulator.module.save(model_path + 'model-' + str(step) + '.pt')
                     train_state = dict(optimizer_state=optimizer.state_dict(),
                                        global_train_state={"step": step},
                                        loss=loss.item())
                     torch.save(train_state, f"{model_path}train_state-{step}.pt")
 
                 # Complete training
-                if (step >= FLAGS.ntraining_steps):
+                if (step >= flags_dict["ntraining_steps"]):
                     not_reached_nsteps = False
                     break
 
@@ -310,39 +335,43 @@ def train(simulator, metadata=None):
     except KeyboardInterrupt:
         pass
 
+    # Save the last state
+    if device == 0:
+        simulator.module.save(model_path + 'model-' + str(step) + '.pt')
+        train_state = dict(optimizer_state=optimizer.state_dict(),
+                           global_train_state={"step": step},
+                           loss=loss.item())
+        torch.save(train_state, f"{model_path}train_state-{step}.pt")
+
+    distribute.cleanup()
 
 def main(_):
 
-    # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if FLAGS.cuda_device_number is not None and torch.cuda.is_available():
-        device = torch.device(f'cuda:{int(FLAGS.cuda_device_number)}')
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "29500"
 
     if FLAGS.mode == 'train':
+        # Convert FLAGS to dict to pass it to train function
+        flags_dict = flags_to_dict(FLAGS)
+
         # read metadata
         metadata = read_metadata(data_path=FLAGS.data_path, purpose="train", file_name=FLAGS.metadata)
 
-        # load simulator
-        simulator = learned_simulator.MeshSimulator(
-            simulation_dimensions=2,
-            nnode_in=11,
-            nedge_in=3,
-            latent_dim=128,
-            nmessage_passing_steps=metadata['nmessage_passing_steps'] if metadata is not None else 10,
-            nmlp_layers=2,
-            mlp_hidden_dim=128,
-            nnode_types=3,
-            node_type_embedding_size=9,
-            device=device)
+        world_size = torch.cuda.device_count()
+        print(f"world_size = {world_size}")
+        distribute.spawn_train(train, world_size, flags_dict, metadata)
 
         if FLAGS.model_file == "None":
            FLAGS.model_file = None
         if FLAGS.train_state_file == "None":
            FLAGS.train_state_file = None
 
-        train(simulator, metadata)
-
     elif FLAGS.mode in ['valid', 'rollout']:
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if FLAGS.cuda_device_number is not None and torch.cuda.is_available():
+            device = torch.device(f'cuda:{int(FLAGS.cuda_device_number)}')
+
         # Read metadata
         metadata = read_metadata(data_path=FLAGS.data_path, purpose="rollout", file_name=FLAGS.metadata)
 

@@ -17,7 +17,7 @@ class MeshSimulator(nn.Module):
             mlp_hidden_dim: int,
             nnode_types: int,
             node_type_embedding_size: int,
-            device="cpu"):
+            device):
         """Initializes the model.
 
         Args:

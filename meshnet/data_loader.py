@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import torch_geometric
 from torch_geometric.data import Data
+from torch_geometric.data import Batch
+
 
 class SamplesDataset(torch.utils.data.Dataset):
 
@@ -90,6 +92,12 @@ class SamplesDataset(torch.utils.data.Dataset):
         return graph
 
 
+def collate_fn(batch):
+    # The input `batch` is a list of Data objects
+    # Use the `Batch.from_data_list` method to combine these into a single Batch object
+    return Batch.from_data_list(batch)
+
+
 class TrajectoriesDataset(torch.utils.data.Dataset):
 
     def __init__(self, path, fixed_mesh):
@@ -152,7 +160,8 @@ class TrajectoriesDataset(torch.utils.data.Dataset):
 
 def get_data_loader_by_samples(path, input_length_sequence, dt, batch_size, shuffle=True, fixed_mesh=True):
     dataset = SamplesDataset(path, input_length_sequence, dt, fixed_mesh)
-    return torch_geometric.loader.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    return torch_geometric.loader.DataLoader(
+        dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_fn)
 
 def get_data_loader_by_trajectories(path, fixed_mesh=True):
     dataset = TrajectoriesDataset(path, fixed_mesh)

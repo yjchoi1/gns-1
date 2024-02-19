@@ -16,6 +16,14 @@ class NodeType(enum.IntEnum):
     SIZE = 9
 
 
+def flags_to_dict(FLAGS):
+    flags_dict = {}
+    for name in FLAGS:
+        flag_value = FLAGS[name].value
+        flags_dict[name] = flag_value
+    return flags_dict
+
+
 def datas_to_graph(training_example, dt, device):
     # features
     node_coords = training_example[0][0]  # (nnodes, dims)
