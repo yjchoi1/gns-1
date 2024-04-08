@@ -6,6 +6,7 @@ import json
 import glob
 import argparse
 import torch.utils.checkpoint
+import torch.nn.functional as F
 from matplotlib import pyplot as plt
 import sys
 
@@ -36,23 +37,37 @@ if not os.path.exists(output_path):
 save_step = 1
 
 # Inputs for ground truth
-ground_truth_npz = "porous_valid0.npz"
-lx, ly = 250, 150
+ground_truth_npz = "porous0.npz"
+lx, ly = 200, 200
 is_fixed_mesh = True
 
 # Inputs for optimizer
 optimizer_type = "adam"  # or lbfgs
 niteration = 50
-inverse_timestep_range = [8, 10]
-inverse_node_range = [[10, 20], [0, 150]]
+inverse_timestep_range = [300, 350]
+observation_patches_edge = [
+    [5, 90],
+    [10, 50], [10, 140],
+    [20, 20], [20, 110], [20, 120], [20, 160],
+    [30, 40], [30, 140],
+    [40, 180],
+    [50, 80],
+    [60, 25], [60, 60], [50, 135], [60, 170],
+    [70, 115],
+    [90, 55], [90, 90], [90, 140],
+    [100, 150],
+    [115, 15], [115, 85],
+    [120, 150]
+]
+observation_patches_size = [10, 10]
 checkpoint_interval = 1
 lr = 0.01
 initial_vleft_x = tools.vel_autogen(
-    ly=ly, shape_option="uniform", args={"peak": [0.15, 0.15], "npoints": ly})
+    ly=ly, shape_option="uniform", args={"peak": [0.25, 0.25], "npoints": ly})
 
 # inputs for forward simulator
-simulator_metadata = utils.read_metadata(data_path, "rollout", "metadata-10gnn.json")
-model_file = "model-1400000.pt"
+simulator_metadata = utils.read_metadata(data_path, "rollout", "metadata-7gnn.json")
+model_file = "model-6150000.pt"
 n_message_passing = simulator_metadata['nmessage_passing_steps'] if simulator_metadata is not None else 10
 node_type_embedding_size = 9
 dt = 0.01  # unnecessary since it is not used in model
@@ -105,10 +120,12 @@ vel_fields_grid_true = velocities.clone().reshape(ntimesteps, ly, lx, 2).permute
 # Empty the initial vel-x that will be updated during optimization
 vel_fields_grid_true[0, 0, :, 0] = 0
 # Get the target data at the inverse timestep and spacial domain range
-vel_fields_grid_target = vel_fields_grid_true[inverse_timestep_range[0]:inverse_timestep_range[1],  # timesteps
-             inverse_node_range[0][0]:inverse_node_range[0][1],  # x-range
-             inverse_node_range[1][0]:inverse_node_range[1][1], :]  # y-range
-target_vel_grid_torch = torch.tensor(vel_fields_grid_target)
+target_vel_fields_patches = tools.sample_patches(
+    vel_fields_grid_true,
+    inverse_timestep_range[0], inverse_timestep_range[1],
+    observation_patches_size[0], observation_patches_size[1],
+    patch_locations=observation_patches_edge
+)
 
 # Initialize initial x-velocity
 initial_vleft_x = torch.tensor(initial_vleft_x, requires_grad=True, device=device)
@@ -189,13 +206,22 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
             quad_grid_config=[lx, ly])
 
         # Get data to compare with target
-        data_vel_grid = vel_fields_grid_pred[
-                        inverse_timestep_range[0]:inverse_timestep_range[1],  # timesteps
-                        inverse_node_range[0][0]:inverse_node_range[0][1],  # x-range
-                        inverse_node_range[1][0]:inverse_node_range[1][1]]  # y-range
+        # data_vel_grid = vel_fields_grid_pred[
+        #                 inverse_timestep_range[0]:inverse_timestep_range[1],  # timesteps
+        #                 observation_patches[0][0]:observation_patches[0][1],  # x-range
+        #                 observation_patches[1][0]:observation_patches[1][1]]  # y-range
+        data_vel_fields_patches = tools.sample_patches(
+            vel_fields_grid_pred,
+            inverse_timestep_range[0], inverse_timestep_range[1],
+            observation_patches_size[0], observation_patches_size[1],
+            patch_locations=observation_patches_edge
+        )
 
         # Loss
-        loss = torch.mean((data_vel_grid - target_vel_grid_torch) ** 2)
+        mse_losses = [
+            F.mse_loss(patch1, patch2)
+            for patch1, patch2 in zip(target_vel_fields_patches, data_vel_fields_patches)]
+        loss = torch.mean(torch.stack(mse_losses))
         print(f"MSE loss: {loss}")
 
         # Plot model: current velocity inference (before update)
@@ -204,13 +230,17 @@ if optimizer_type == "adam" or optimizer_type == "sgd":
         fig_model.savefig(f"{output_path}/model-{iteration}.png")
 
         # Plot data: current velocity field (before update)
-        highlight_x = inverse_node_range[0][0] * x_conversion
-        highlight_y = inverse_node_range[1][0] * y_conversion
-        highlight_len_x = (inverse_node_range[0][1] - inverse_node_range[0][0]) * x_conversion
-        highlight_len_y = (inverse_node_range[1][1] - inverse_node_range[1][0]) * y_conversion
+        # highlight_x = observation_patches[0][0] * x_conversion
+        # highlight_y = observation_patches[1][0] * y_conversion
+        # highlight_len_x = (observation_patches[0][1] - observation_patches[0][0]) * x_conversion
+        # highlight_len_y = (observation_patches[1][1] - observation_patches[1][0]) * y_conversion
+        highlight_regions = [
+            (x_edge * x_conversion, y_edge * y_conversion, observation_patches_size[0] * x_conversion, observation_patches_size[1] * y_conversion)
+            for x_edge, y_edge in observation_patches_edge]
+
         fig_data = vis.plot_field_compare(
             timestep=inverse_timestep_range[1]-INPUT_SEQUENCE_LENGTH,
-            highlight=(highlight_x, highlight_y, highlight_len_x, highlight_len_y),
+            highlights=highlight_regions,
             title=f"Iteration={iteration}, MSE={loss.item():.3e}")
         fig_data.savefig(f"{output_path}/data_t{inverse_timestep_range[1]-INPUT_SEQUENCE_LENGTH}-{iteration}.png")
 

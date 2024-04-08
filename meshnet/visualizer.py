@@ -181,7 +181,7 @@ class VisMeshNet:
         return fig
 
     def plot_field_compare(
-            self, timestep, highlight=None, title=None, figsize=(9, 4)):
+            self, timestep, highlights=None, title=None, figsize=(9, 4)):
 
         vel_mag_set = {
             "Ground truth": self.vel_mag_true,
@@ -215,13 +215,15 @@ class VisMeshNet:
 
             for i, (sim, vel_mag) in enumerate(vel_mag_set.items()):
 
-                if highlight is not None:
+                if highlights is not None:
                     # create a rectangle patch
-                    rect = patches.Rectangle(
-                        (highlight[0], highlight[1]), highlight[2], highlight[3],
-                        linewidth=1, linestyle='-', edgecolor='r', facecolor='none', alpha=0.7)
-                    # Add the patch to the Axes
-                    grid[i].add_patch(rect)
+                    for highlight in highlights:  # Iterate over each highlight tuple
+                        # create a rectangle patch for each highlight
+                        rect = patches.Rectangle(
+                            (highlight[0], highlight[1]), highlight[2], highlight[3],
+                            linewidth=1, linestyle='-', edgecolor='r', facecolor='none', alpha=0.7)
+                        # Add the patch to the Axes
+                        grid[i].add_patch(rect)
 
                 # Reshape vel data to grid data
                 vel_grid = vel_mag[timestep].reshape(self.ly, self.lx)

@@ -1,6 +1,46 @@
 import numpy as np
 import torch
+import random
 from scipy.optimize import curve_fit
+
+
+def sample_patches(velocity_field, t0, t1, n, m, patch_locations=None, num_patches=None):
+    """
+    Sample patches from a velocity field tensor, allowing for user-defined patch locations.
+
+    Parameters:
+    - velocity_field: Tensor of shape (ntimes, nx, ny)
+    - t0, t1: Time range from which to sample
+    - n, m: Dimensions of the patches to sample
+    - patch_locations: Optional list of tuples specifying the lower-left corners of the patches
+    - num_patches: Number of patches to sample randomly if patch_locations is not provided
+
+    Returns:
+    - A list of tensors, each of shape (t1-t0+1, n, m), representing sampled patches
+    """
+    patches = []
+    ntimes, nx, ny, _ = velocity_field.shape
+
+    # Ensure t0, t1 are within bounds
+    t0, t1 = max(0, t0), min(ntimes, t1)
+
+    if patch_locations is None:
+        patch_locations = []
+        for _ in range(num_patches):
+            # Randomly select the lower-left corner of the patch
+            x0 = random.randint(0, nx - n)
+            y0 = random.randint(0, ny - m)
+            patch_locations.append((x0, y0))
+
+    for x0, y0 in patch_locations:
+        # Ensure the patch is within the grid bounds
+        x0, y0 = min(x0, nx - n), min(y0, ny - m)
+
+        # Extract the patch
+        patch = velocity_field[t0:t1, x0:x0+n, y0:y0+m, :]
+        patches.append(patch)
+
+    return patches
 
 
 def vel_autogen(ly, shape_option, args):
