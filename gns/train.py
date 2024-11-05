@@ -205,7 +205,7 @@ def predict(device: str, cfg: DictConfig):
                 with open(filename, "wb") as f:
                     pickle.dump(example_rollout, f)
             if cfg.rendering.mode:
-                rendering(cfg.output.path, filename_render, cfg)
+                rendering(cfg.output.path, f"{cfg.output.filename}_ex{example_i}", cfg)
 
     print(
         "Mean loss on rollout prediction: {}".format(torch.mean(torch.cat(eval_loss)))
