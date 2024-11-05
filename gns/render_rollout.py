@@ -275,13 +275,15 @@ class Render:
                     "material_property" in self.rollout_data
                     and self.rollout_data["material_property"] is not None
                 ):
-                    material_property = self.rollout_data["material_property"]
-                    data["material_property"] = material_property
+                    if self.rollout_data["material_property"].ndim > 1:
+                        data["material_property"] = np.linalg.norm(self.rollout_data["material_property"], axis=1)
+                    else:
+                        data["material_property"] = self.rollout_data["material_property"]
 
                     # Create a color field based on material property and particle type
-                    color_field = np.copy(material_property)
+                    color_field = np.copy(data["material_property"])
                     static_particle_value = (
-                        np.max(material_property) + 1
+                        np.max(data["material_property"]) + 1
                     )  # Use a value outside the material property range
                     color_field[particle_type == 3] = (
                         static_particle_value  # Assumes static particle type = 3
