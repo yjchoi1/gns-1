@@ -8,6 +8,7 @@ import torch_geometric.transforms as T
 import re
 import pickle
 from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 from absl import flags
 from absl import app
@@ -35,6 +36,7 @@ flags.DEFINE_string('metadata', "metadata.json", help='Metadata filename (.json)
 flags.DEFINE_string('model_file', None, help=('Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 flags.DEFINE_string('train_state_file', None, help=('Train state filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
 flags.DEFINE_string('rollout_filename', "rollout", help='Name saving the rollout')
+flags.DEFINE_string('tensorboard_log_dir', 'logs', help='Directory for tensorboard logs')
 
 flags.DEFINE_integer('ntraining_steps', int(1E7), help='Number of training steps.')
 flags.DEFINE_integer('nsave_steps', int(1000), help='Number of steps at which to save the model.')
@@ -192,6 +194,10 @@ def train(simulator, metadata=None):
 
     print(f"device = {device}")
 
+    # Initialize tensorboard writer with more descriptive run name
+    run_name = f"batch_{FLAGS.batch_size}_lr_{FLAGS.lr_init}"
+    writer = SummaryWriter(os.path.join(FLAGS.tensorboard_log_dir, run_name))
+
     # Get hyperparameters
     if metadata is not None and "noise_std" in metadata:
         noise_std = metadata["noise_std"]
@@ -249,8 +255,12 @@ def train(simulator, metadata=None):
                                                 fixed_mesh=FLAGS.is_fixed_mesh)
 
     not_reached_nsteps = True
+    epoch_loss = 0.0
+    batch_count = 0
+    epoch = 0
     try:
         while not_reached_nsteps:
+            epoch += 1
             for i, graph in enumerate(ds):
                 # Represent graph using edge_index and make edge_feature to be using [relative_distance, norm]
                 graph = transformer(graph.to(device))
@@ -279,6 +289,10 @@ def train(simulator, metadata=None):
                 errors = ((pred_acc - target_acc)**2)[mask]  # only compute errors if node_types is NORMAL or OUTFLOW
                 loss = torch.mean(errors)
 
+                # Track epoch loss
+                epoch_loss += loss.item()
+                batch_count += 1
+
                 # Computes the gradient of loss
                 optimizer.zero_grad()
                 loss.backward()
@@ -289,9 +303,22 @@ def train(simulator, metadata=None):
                 for param in optimizer.param_groups:
                     param['lr'] = lr_new
 
+                # Log metrics to tensorboard
+                # Add more detailed metrics
+                writer.add_scalar('Training/Batch_Loss', loss.item(), step)
+                writer.add_scalar('Training/Learning_Rate', lr_new, step)
+                
                 if step % loss_report_step == 0:
-                    print(f"Training step: {step}/{FLAGS.ntraining_steps}. Loss: {loss}.")
-
+                    avg_loss = epoch_loss / batch_count if batch_count > 0 else 0
+                    print(f"Epoch: {epoch}, Training step: {step}/{FLAGS.ntraining_steps}. Batch Loss: {loss:.6f}, Average Loss: {avg_loss:.6f}")
+                    
+                    # Log epoch loss and reset counters
+                    if batch_count > 0:
+                        avg_epoch_loss = epoch_loss / batch_count
+                        writer.add_scalar('Training/Epoch_Loss', avg_epoch_loss, step)
+                        epoch_loss = 0.0
+                        batch_count = 0                        
+                        
                 # Save model state
                 if step % FLAGS.nsave_steps == 0:
                     simulator.save(model_path + 'model-' + str(step) + '.pt')
@@ -309,6 +336,8 @@ def train(simulator, metadata=None):
 
     except KeyboardInterrupt:
         pass
+
+    writer.close()
 
 
 def main(_):
